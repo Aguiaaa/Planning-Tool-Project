@@ -1,11 +1,8 @@
-# AUTHORS
-
+#AUTHORS 
 
 ## Contributeurs
+
 
 - **GUIA Amine** – 22305962
 - **GUIRIEV Abdula** – 22315618
 - **FILIPOVICH Bogdan**
-
-
-
