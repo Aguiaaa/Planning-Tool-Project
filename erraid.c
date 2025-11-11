@@ -33,9 +33,9 @@ int main (int argc, char *argv[]) {
    
     init_pipes() ; 
 
-    int fd_request = open(PATH1, O_RDONLY);
+    int fd_request = open(PATH1, O_RDONLY); //lire la requete du client 
     if (fd_request == -1) {exit(1) ; } 
-    int fd_reply = open(PATH2, O_WRONLY) ; 
+    int fd_reply = open(PATH2, O_WRONLY) ;  // ecrire la reponse pour le client 
     if (fd_reply == -1) {exit(1) ; } 
     
     char buf[512] ; 
