@@ -1,11 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 
-int main () {
 
-    write(1 , "test tadmor" ,11 ) ; 
+
+int main(int argc, char *argv[]) {
+ 
 }
-
-
