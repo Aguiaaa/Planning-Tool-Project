@@ -11,7 +11,7 @@ typedef struct {
     uint32_t LENGTH ; 
     uint8_t * DATA ; 
 
-} string ; 
+} string ;
 
 typedef struct {
     uint64_t  MINUTES ; 

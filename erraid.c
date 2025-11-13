@@ -68,6 +68,33 @@ int init_pipes_r(char * c) {
     return 1 ; 
 }
 */
+
+static void print_command(const command *cmd) {
+    if (!cmd) {
+        printf("(commande NULL)");
+        return;
+    }
+
+    if (cmd->type == 0x5349) { 
+        printf("[ARGC=%u] ", cmd->args.ARGC);
+        for (uint32_t i = 0; i < cmd->args.ARGC; ++i) {
+            string *s = &cmd->args.ARGV[i];
+            printf("«%.*s»", s->LENGTH, (char *)s->DATA);
+            if (i + 1 < cmd->args.ARGC)
+                printf(" ");
+        }
+    } else {
+        printf("(SEQ ");
+        for (uint32_t i = 0; i < cmd->combinaison.ncmds; ++i) {
+            print_command(&cmd->combinaison.sous_command[i]);
+            if (i + 1 < cmd->combinaison.ncmds)
+                printf("; ");
+        }
+        printf(")");
+    }
+}
+
+
 uint64_t  number_of_tasks (char * chemin) {
     DIR *dir = opendir(chemin) ; 
     uint64_t cpt = 0 ; 
@@ -100,9 +127,10 @@ void read_cmd (command * c , char * chemin) {
             n = read (fd_argv , &argc , 4 ) ;  
             c->args.ARGC = be32toh(argc) ; 
             c->args.ARGV = malloc(c->args.ARGC * sizeof(string));
-            for (uint32_t i = 0 ; i < c->args.ARGC ; i++ ) {
+            for (uint32_t i = 0 ; i < c->args.ARGC ; ++i ) {
                 uint32_t length ; 
                 n = read (fd_argv , &length , 4) ;
+                length = be32toh(length);
                 c->args.ARGV[i].LENGTH = be32toh(length) ;
                 c->args.ARGV[i].DATA = malloc (length + 1) ;  
                 read(fd_argv, c->args.ARGV[i].DATA, length);
@@ -220,6 +248,10 @@ int main (int argc, char *argv[]) {
                (unsigned long long)T[i].tm.MINUTES);
         printf("  HOURS   = 0x%08x\n", T[i].tm.HOURS);
         printf("  DOW     = 0x%02x\n", T[i].tm.DAYSOFWEEK);
+
+        printf("  commande = ");
+        print_command(T[i].commandes);
+        putchar('\n');
     }
 
     free(T);
