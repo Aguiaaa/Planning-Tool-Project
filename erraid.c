@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -10,20 +9,24 @@
 #include "erraid.h"
 #include <dirent.h>
 
-struct dirent *entry , *entry2 ; 
+#ifndef WIN32
+    #include <sys/types.h>
+#endif
+
+struct dirent *entry , *entry2 ;
 struct stat st;
 
 /*
-char chemin_erraid[256] , chemin_tasks[256] ,PATH1[256], PATH2[256] ; 
+char chemin_erraid[256] , chemin_tasks[256] ,PATH1[256], PATH2[256] ;
 
-int run = 1 ; 
+int run = 1 ;
 
 //initialiser les tubes de communications pour l'instant sans option -r
 void init_pipes() {
-    
-    
-    const char * user = getenv("USER") ; 
-    snprintf (chemin_erraid, sizeof chemin_erraid , "/tmp/%s/erraid/", user) ; 
+
+
+    const char * user = getenv("USER") ;
+    snprintf (chemin_erraid, sizeof chemin_erraid , "/tmp/%s/erraid/", user) ;
     if (mkdir(chemin_erraid, 0700) == -1 && errno != EEXIST) {
         perror("mkdir");
     }
@@ -32,81 +35,67 @@ void init_pipes() {
         perror("mkdir");
     }
 
-    char chemin2[256] ; 
-    snprintf(chemin2 ,sizeof chemin2, "%s/pipes/", chemin_erraid) ; 
+    char chemin2[256] ;
+    snprintf(chemin2 ,sizeof chemin2, "%s/pipes/", chemin_erraid) ;
     if (mkdir(chemin2, 0700) == -1 && errno != EEXIST) {
         perror("mkdir");
     }
 
 
-    snprintf (PATH1, sizeof PATH1 , "%serraid-request-pipe", chemin2) ; 
-    snprintf(PATH2 , sizeof PATH2, "%serraid-reply-pipe", chemin2) ; 
+    snprintf (PATH1, sizeof PATH1 , "%serraid-request-pipe", chemin2) ;
+    snprintf(PATH2 , sizeof PATH2, "%serraid-reply-pipe", chemin2) ;
     if (mkfifo(PATH1, 0666) == -1 && errno != EEXIST) perror ("mkfifo request") ;
-    if (mkfifo(PATH2, 0666) == -1 && errno != EEXIST) perror ("mkfifo reply") ; 
+    if (mkfifo(PATH2, 0666) == -1 && errno != EEXIST) perror ("mkfifo reply") ;
 
 }
 
 int init_pipes_r(char * c) {
-    
-    snprintf (chemin_erraid, sizeof chemin_erraid , "%s/erraid/", c) ; 
+
+    snprintf (chemin_erraid, sizeof chemin_erraid , "%s/erraid/", c) ;
     if (mkdir(chemin_erraid, 0700) == -1 && errno != EEXIST) {
         perror("mkdir");
-        return -1 ; 
+        return -1 ;
     }
-    char chemin2[256] ; 
-    snprintf(chemin2 ,sizeof chemin2, "%spipes/", chemin_erraid) ; 
+    char chemin2[256] ;
+    snprintf(chemin2 ,sizeof chemin2, "%spipes/", chemin_erraid) ;
     if (mkdir(chemin2, 0700) == -1 && errno != EEXIST) {
         perror("mkdir");
-        return -1 ; 
+        return -1 ;
     }
 
-    snprintf (PATH1, sizeof PATH1 , "%serraid-request-pipe", chemin2) ; 
-    snprintf(PATH2 , sizeof PATH2, "%serraid-reply-pipe", chemin2) ; 
+    snprintf (PATH1, sizeof PATH1 , "%serraid-request-pipe", chemin2) ;
+    snprintf(PATH2 , sizeof PATH2, "%serraid-reply-pipe", chemin2) ;
     if (mkfifo(PATH1, 0666) == -1 && errno != EEXIST) perror ("mkfifo request") ;
-    if (mkfifo(PATH2, 0666) == -1 && errno != EEXIST) perror ("mkfifo reply") ; 
+    if (mkfifo(PATH2, 0666) == -1 && errno != EEXIST) perror ("mkfifo reply") ;
 
-    return 1 ; 
+    return 1 ;
 }
 */
 
-static void print_command(const command *cmd) {
-    if (!cmd) {
-        printf("(commande NULL)");
-        return;
+int number_of_tasks (char * chemin) {
+
+    DIR *dir = opendir(chemin);
+
+    if (dir == NULL) {
+	    perror("Echec lors de l'ouverture du dossier.");
+	    exit(EXIT_FAILURE);
     }
 
-    if (cmd->type == 0x5349) { 
-        printf("[ARGC=%u] ", cmd->args.ARGC);
-        for (uint32_t i = 0; i < cmd->args.ARGC; ++i) {
-            string *s = &cmd->args.ARGV[i];
-            printf("«%.*s»", s->LENGTH, (char *)s->DATA);
-            if (i + 1 < cmd->args.ARGC)
-                printf(" ");
-        }
-    } else {
-        printf("(SEQ ");
-        for (uint32_t i = 0; i < cmd->combinaison.ncmds; ++i) {
-            print_command(&cmd->combinaison.sous_command[i]);
-            if (i + 1 < cmd->combinaison.ncmds)
-                printf("; ");
-        }
-        printf(")");
-    }
-}
-
-
-uint64_t  number_of_tasks (char * chemin) {
-    DIR *dir = opendir(chemin) ; 
-    uint64_t cpt = 0 ; 
+    int cpt = 0 ;
     while ((entry = readdir(dir)) != NULL) {
         if (strcmp(entry->d_name , "." ) && strcmp(entry->d_name , ".." ) ) {cpt++;}
     }
-    closedir(dir) ; 
+    
+    if (closedir(dir) == -1) {
+	perror("Echec lors de la fermeture du dossier.");
+	exit(EXIT_FAILURE);
+    }
 
     return cpt ; 
 }
+
 void read_cmd (command * c , char * chemin) {
-        char chemin_cmd [256] ; 
+        char chemin_cmd [256] ;
         snprintf(chemin_cmd , sizeof chemin_cmd , "%s/cmd", chemin) ; 
         char chemin_fichier_type [256];
         snprintf(chemin_fichier_type, sizeof chemin_fichier_type , "%s/type" , chemin_cmd) ;
@@ -126,7 +115,8 @@ void read_cmd (command * c , char * chemin) {
             uint32_t argc ; 
             n = read (fd_argv , &argc , 4 ) ;  
             c->args.ARGC = be32toh(argc) ; 
-            c->args.ARGV = malloc(c->args.ARGC * sizeof(string));
+            c->args.ARGV =
+            malloc(c->args.ARGC * sizeof(string));
             for (uint32_t i = 0 ; i < c->args.ARGC ; ++i ) {
                 uint32_t length ; 
                 n = read (fd_argv , &length , 4) ;
@@ -140,10 +130,13 @@ void read_cmd (command * c , char * chemin) {
 
         }
         else {
-            uint64_t number_of_cmd = 0 ; 
-            DIR * d_cmd = opendir(chemin_cmd) ; 
+            uint32_t number_of_cmd = 0 ;
+            DIR * d_cmd = opendir(chemin_cmd) ;
+
             while ((entry2 = readdir(d_cmd)) != NULL )
             {
+                if (strcmp(entry2->d_name,".") == 0 ||
+                    strcmp(entry2->d_name,"..") == 0) continue;
                 char path[256];
                 snprintf(path, sizeof path, "%s/%s", chemin_cmd, entry2->d_name);
                 struct stat st;
@@ -154,20 +147,31 @@ void read_cmd (command * c , char * chemin) {
             c->combinaison.ncmds = number_of_cmd ; 
             c->combinaison.sous_command = malloc(number_of_cmd * sizeof(command));
             d_cmd = opendir(chemin_cmd) ; 
-            uint32_t i = strtoul(entry->d_name, NULL, 10); 
+
             while ((entry2 = readdir (d_cmd)) != NULL) {
+                if (strcmp(entry2->d_name, ".") == 0 ||
+                    strcmp(entry2->d_name, "..") == 0) continue;
+                uint32_t i = strtoul(entry2->d_name, NULL, 10);
                 char chemin_sous_cmd [256] ; 
-                snprintf(chemin_sous_cmd, sizeof chemin_sous_cmd, "%s/%s", chemin_cmd, entry2->d_name) ; 
+                snprintf(chemin_sous_cmd, sizeof chemin_sous_cmd, "%s/%s", chemin_cmd, entry2->d_name) ;
                 read_cmd(&(c->combinaison.sous_command[i]) , chemin_sous_cmd) ; 
             }
             closedir(d_cmd) ;
 
         }
 }
-tasks *  read_tasks (char * chemin) {
-    tasks * TASKS = malloc (sizeof(tasks) * number_of_tasks(chemin)) ; 
-    DIR *dir = opendir(chemin) ; 
-    uint64_t  i = 0 ; 
+
+tasks * read_tasks (char * chemin) {
+
+    tasks * TASKS = malloc (sizeof(tasks) * number_of_tasks(chemin)) ;
+
+    DIR *dir = opendir(chemin) ;
+    if (dir == NULL) {
+        perror("Echec lors de l'ouverture du dossier.");
+        exit(EXIT_FAILURE);
+    }
+
+    int i = 0 ;
     while ((entry = readdir(dir)) != NULL) {
         tasks tache ; 
         if (strcmp(entry->d_name , ".") != 0 && strcmp(entry->d_name , "..") != 0) {
@@ -204,25 +208,56 @@ tasks *  read_tasks (char * chemin) {
             i++ ;  
         }
     }
-    return TASKS; 
-
-
+    closedir(dir);
+    if (closedir(dir) == -1) {
+	perror("Echec lors de la fermeture du dossier.");
+	exit(EXIT_FAILURE);
+    }
+    return TASKS;
 }
 
+static void print_command(const command *cmd) {
+    if (!cmd) {
+        printf("(commande NULL)");
+        return;
+    }
+
+    if (cmd->type == 0x5349) { 
+        printf("[ARGC=%u] ", cmd->args.ARGC);
+        for (uint32_t i = 0; i < cmd->args.ARGC; ++i) {
+            string *s = &cmd->args.ARGV[i];
+            printf("«%.*s»", s->LENGTH, (char *)s->DATA);
+            if (i + 1 < cmd->args.ARGC)
+                printf(" ");
+        }
+    } else {
+        printf("(SEQ ");
+        for (uint32_t i = 0; i < cmd->combinaison.ncmds; ++i) {
+            print_command(&cmd->combinaison.sous_command[i]);
+            if (i + 1 < cmd->combinaison.ncmds)
+                printf("; ");
+        }
+        printf(")");
+    }
+}
 
 int main (int argc, char *argv[]) {
-    char * chemin_tasks ; 
+
+    char chemin_tasks[256] ;
+
     if (argc == 1) {
-        char * user = getenv("USER") ;
-        char chemin_aux[256] ;  
-        snprintf (chemin_aux , sizeof chemin_aux, "/tmp/%s/erraid/tasks", user) ; 
-        chemin_tasks = chemin_aux ; 
-        printf ("%s\n", chemin_tasks) ; 
-    } else if (argc == 3 && strcmp(argv[1], "-r") == 0) {
-        chemin_tasks = argv[2] ; 
-        printf ("%s\n", chemin_tasks) ; 
-    } else {
-        write(2, "Usage: ./erraid [-r BASE_PATH]\n", 32 );
+        char *user = getenv("USER");
+        snprintf(chemin_tasks, sizeof(chemin_tasks), "/tmp/%s/erraid/tasks", user);
+        printf("%s\n", chemin_tasks);
+    }
+
+    else if (argc == 3 && strcmp(argv[1], "-r") == 0) {
+        snprintf(chemin_tasks, sizeof(chemin_tasks), "%s", argv[2]);
+        printf("%s\n", chemin_tasks);
+    }
+
+    else {
+        write(2, "Usage: ./erraid [-r BASE_PATH]\n", 32);
         return 1;
     }
 
@@ -230,7 +265,7 @@ int main (int argc, char *argv[]) {
     printf("Chemin tasks = %s\n", chemin_tasks);
 
     //debut de TEST pour read_tasks()
-    uint64_t nbtasks = number_of_tasks(chemin_tasks);
+    int nbtasks = number_of_tasks(chemin_tasks);
     printf("Nombre de tâches trouvées : %llu\n",
            (unsigned long long)nbtasks);
 
@@ -239,7 +274,8 @@ int main (int argc, char *argv[]) {
         write(2, "Erreur dans read_tasks\n", 24);
         return 1;
     }
-    for (uint64_t i = 0; i < nbtasks; ++i) {
+
+    for (int i = 0; i < nbtasks; ++i) {
         printf("Task %llu:\n", (unsigned long long)T[i].ID);
         printf("  chemin = %.*s\n",
                T[i].chemin.LENGTH,
@@ -258,14 +294,17 @@ int main (int argc, char *argv[]) {
 
     //fin de TEST pour read_tasks()
 
+    // TODO: Il faut libérer les structure de données imbriquées; là on ne libère que superficiellement pour cela faudrait une/des fonctions récursives qui free().
+    // TODO: Sinon on va avoir des fuites de mémoires.
+
     /*
-    int fd_request = open(PATH1, O_RDONLY); //lire la requete du client 
-    if (fd_request == -1) {exit(1) ; } 
-    int fd_reply = open(PATH2, O_WRONLY) ;  // ecrire la reponse pour le client 
-    if (fd_reply == -1) {exit(1) ; } 
+    int fd_request = open(PATH1, O_RDONLY); //lire la requete du client
+    if (fd_request == -1) {exit(1) ; }
+    int fd_reply = open(PATH2, O_WRONLY) ;  // ecrire la reponse pour le client
+    if (fd_reply == -1) {exit(1) ; }
 
     */
-  
+
 }
 
 

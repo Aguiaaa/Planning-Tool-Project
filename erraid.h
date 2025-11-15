@@ -1,10 +1,7 @@
-#ifndef ERRAID_H     // Protection contre les inclusions multiples
+#ifndef ERRAID_H
 #define  ERRAID_H   
 
-
 #include <stdint.h>
-
-
 
 
 typedef struct {
