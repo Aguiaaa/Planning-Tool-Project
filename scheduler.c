@@ -1,22 +1,23 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/wait.h>
-#include "erraid.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <fcntl.h>
+#include <string.h>
+#include "erraid.h"
+#include "logger.h"
 
 bool validate_command(command *cmd) {
 	if (cmd == NULL) {
 		fprintf(stderr, "commande est NULL.\n");
 		return false;
 	}
-	
 	if (cmd->type != 0x5349 && cmd->type != 0x5351) {
 		fprintf(stderr, "type invalide.\n");
 		return false;
 	}
-	
 	if (cmd->type == 0x5349) {
 		if (cmd->args.ARGC == 0) {
 			fprintf(stderr, "ARGC est 0.\n");
@@ -37,7 +38,7 @@ bool validate_command(command *cmd) {
 			}
 		}
 	} else {
-		if (cmd->combinaison.ncmds == 0) { //TODO : Rejeter les structures contenant un nombre trop grand de commandes.
+		if (cmd->combinaison.ncmds == 0) { //TODO : Rejeter les structures contenant un nombre trop grand de commandes avec un nombre limite d'appels récursifs et un compteur de ncmds.
 			fprintf(stderr, "ncmds est 0.\n");
 			return false;
 		}
@@ -51,7 +52,6 @@ bool validate_command(command *cmd) {
 			}
 		}
 	}
-	
 	return true;
 }
 
@@ -105,10 +105,18 @@ bool should_run(tasks *T, struct tm *tm_now) {
 	       (T->tm.DAYSOFWEEK & bit_day);
 }
 
+// The exit status of a sequential list shall be the exit status of the last command in the list.
+// Source: Definition of the Shell Command Language by https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html
+// C'est pour cela que nous retournons le dernier code sortie et écrasons ceux des commandes intermédiaires dans le bloc SEQ 0x5351.
 void execute_task(tasks *T) {
-	execute_cmd(T->commandes);
+    char chemin_stdout[512];
+    char chemin_stderr[512];
+    snprintf(chemin_stdout, sizeof(chemin_stdout), "%s/stdout", (char*)T->chemin.DATA);
+    snprintf(chemin_stderr, sizeof(chemin_stderr), "%s/stderr", (char*)T->chemin.DATA);
+    int codesortie = execute_cmd(T->commandes, chemin_stdout, chemin_stderr);
+    log_execution((char*)T->chemin.DATA, codesortie);
 }
-void execute_cmd(command * cmd) { //TODO: Utiliser le logger.
+int execute_cmd(command *cmd, const char * chemin_stdout, const char * chemin_stderr) {
     if (cmd->type == 0x5349) {
     		pid_t pid = fork();
 
@@ -122,7 +130,12 @@ void execute_cmd(command * cmd) { //TODO: Utiliser le logger.
     				argv[i] = (char*)cmd->args.ARGV[i].DATA;
     			}
     			argv[cmd->args.ARGC] = NULL;
-
+                int fd_out = open((char*)chemin_stdout, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                int fd_err = open((char*)chemin_stderr, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                dup2(fd_out, STDOUT_FILENO);
+                dup2(fd_err, STDERR_FILENO);
+                close(fd_out);
+                close(fd_err);
     			execvp(argv[0], argv);
     			perror("execvp");
     			free(argv);
@@ -130,13 +143,20 @@ void execute_cmd(command * cmd) { //TODO: Utiliser le logger.
     		} else if (pid > 0) {
     			int status;
     			waitpid(pid, &status, 0);
+                if (WIFEXITED(status)) {
+                    return WEXITSTATUS(status);
+                } else {
+                    return -1;
+                }
     		}
     		else { perror("fork");
-    		    return;
+    		    return -1;
     		}
-    	} else if(cmd->type == 0x05351) {
-            for (uint32_t i = 0; i<cmd->ncmds; i++) {
-                execute_cmd(cmd->sous_command[i]);
+    	} else if(cmd->type == 0x5351) {
+            int dernier_code_sortie = 0;
+            for (uint32_t i = 0; i < cmd->combinaison.ncmds; i++) {
+                dernier_code_sortie = execute_cmd(&cmd->combinaison.sous_command[i], chemin_stdout, chemin_stderr);
             }
-        }
+            return dernier_code_sortie;
+        } fprintf(stderr, "Problème inattendu lors de l'exécution d'une commande.\n"); return -1;
 }
