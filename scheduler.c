@@ -37,7 +37,7 @@ bool validate_command(command *cmd) {
 			}
 		}
 	} else {
-		if (cmd->combinaison.ncmds == 0) {
+		if (cmd->combinaison.ncmds == 0) { //TODO : Rejeter les structures contenant un nombre trop grand de commandes.
 			fprintf(stderr, "ncmds est 0.\n");
 			return false;
 		}
@@ -106,22 +106,37 @@ bool should_run(tasks *T, struct tm *tm_now) {
 }
 
 void execute_task(tasks *T) {
-	if (T->commandes->type == 0x5349) {
-		pid_t pid = fork();
-		
-		if (pid == 0) {
-			char **argv = malloc((T->commandes->args.ARGC + 1) * sizeof(char*));
-			for (uint32_t i = 0; i < T->commandes->args.ARGC; i++) {
-				argv[i] = (char*)T->commandes->args.ARGV[i].DATA;
-			}
-			argv[T->commandes->args.ARGC] = NULL;
-			
-			execvp(argv[0], argv);
-			perror("execvp");
-			_exit(1);
-		} else if (pid > 0) {
-			int status;
-			waitpid(pid, &status, 0);
-		}
-	}
+	execute_cmd(T->commandes);
+}
+void execute_cmd(command * cmd) { //TODO: Utiliser le logger.
+    if (cmd->type == 0x5349) {
+    		pid_t pid = fork();
+
+    		if (pid == 0) {
+    			char **argv = malloc((cmd->args.ARGC + 1) * sizeof(char*));
+    			if (argv == NULL) {
+                    perror("malloc");
+                    _exit(1);
+    			}
+    			for (uint32_t i = 0; i < cmd->args.ARGC; i++) {
+    				argv[i] = (char*)cmd->args.ARGV[i].DATA;
+    			}
+    			argv[cmd->args.ARGC] = NULL;
+
+    			execvp(argv[0], argv);
+    			perror("execvp");
+    			free(argv);
+    			_exit(1);
+    		} else if (pid > 0) {
+    			int status;
+    			waitpid(pid, &status, 0);
+    		}
+    		else { perror("fork");
+    		    return;
+    		}
+    	} else if(cmd->type == 0x05351) {
+            for (uint32_t i = 0; i<cmd->ncmds; i++) {
+                execute_cmd(cmd->sous_command[i]);
+            }
+        }
 }
