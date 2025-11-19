@@ -1,5 +1,8 @@
-Tâche 0 : Toutes les minutes, tous les jours sauf le lundi, lance la commande
-         `echo "Feed me lasagna"`
-Tâche 1 : Toutes les heures (à l'heure pile), le lundi, lance la commande
-         `echo "I hate mondays"`
-Aucune des deux commandes n'a encore été lancée
+Tâche 4 : Toutes les minutes, lance la séquence
+          ```
+          echo -n "Nous sommes le ";
+          date "+%d/%m/%Y";
+          echo -n "Il est ";
+          date "+%H:%M:%S"
+          ```
+Cette tâche a déjà été lancée deux fois

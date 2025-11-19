@@ -10,6 +10,7 @@
 #include "erraid.h"
 #include <dirent.h>
 
+
 struct dirent *entry , *entry2 ; 
 struct stat st;
 
@@ -105,9 +106,8 @@ uint64_t  number_of_tasks (char * chemin) {
 
     return cpt ; 
 }
-void read_cmd (command * c , char * chemin) {
-        char chemin_cmd [256] ; 
-        snprintf(chemin_cmd , sizeof chemin_cmd , "%s/cmd", chemin) ; 
+void read_cmd (command * c , char * chemin, char * chemin_cmd) {
+       
         char chemin_fichier_type [256];
         snprintf(chemin_fichier_type, sizeof chemin_fichier_type , "%s/type" , chemin_cmd) ;
         int fd_type = open (chemin_fichier_type , O_RDONLY); 
@@ -136,7 +136,9 @@ void read_cmd (command * c , char * chemin) {
                 read(fd_argv, c->args.ARGV[i].DATA, length);
                 c->args.ARGV[i].DATA[length] = '\0';
             }
+            
             close(fd_argv) ; 
+            return ; 
 
         }
         else {
@@ -144,25 +146,37 @@ void read_cmd (command * c , char * chemin) {
             DIR * d_cmd = opendir(chemin_cmd) ; 
             while ((entry2 = readdir(d_cmd)) != NULL )
             {
+                if (strcmp(entry2->d_name , ".") != 0 && strcmp(entry2->d_name , "..") != 0) {  
                 char path[256];
                 snprintf(path, sizeof path, "%s/%s", chemin_cmd, entry2->d_name);
-                struct stat st;
                 stat(path, &st);
-                if (S_ISDIR(st.st_mode)) { number_of_cmd++ ; }
+                if (S_ISDIR(st.st_mode)) { printf ("sous commande : %s\n", entry2->d_name) ; number_of_cmd++ ; }
+                }
+                
             }
+            printf("nombres de sous comamndes : %d\n", number_of_cmd) ; 
             closedir(d_cmd) ; 
-            c->combinaison.ncmds = number_of_cmd ; 
+            c->combinaison.ncmds = (uint32_t) number_of_cmd ; 
             c->combinaison.sous_command = malloc(number_of_cmd * sizeof(command));
             d_cmd = opendir(chemin_cmd) ; 
-            uint32_t i = strtoul(entry->d_name, NULL, 10); 
-            while ((entry2 = readdir (d_cmd)) != NULL) {
-                char chemin_sous_cmd [256] ; 
-                snprintf(chemin_sous_cmd, sizeof chemin_sous_cmd, "%s/%s", chemin_cmd, entry2->d_name) ; 
-                read_cmd(&(c->combinaison.sous_command[i]) , chemin_sous_cmd) ; 
+
+            while ((entry2 = readdir (d_cmd)) != NULL ) {
+                if (strcmp(entry2->d_name , ".") != 0 && strcmp(entry2->d_name , "..") != 0) {  
+                char chemin_sous_cmd [256]; 
+                snprintf(chemin_sous_cmd, sizeof chemin_sous_cmd, "%s/%s", chemin_cmd, entry2->d_name); 
+                if (stat(chemin_sous_cmd, &st) == 0 && S_ISDIR(st.st_mode)) {
+                    uint32_t i = (uint32_t)strtoul(entry2->d_name, NULL, 10);
+                    if (i < c->combinaison.ncmds) {
+                        read_cmd(&(c->combinaison.sous_command[i]) , chemin_sous_cmd, chemin_sous_cmd); 
+                    }
+                }
+                }
             }
             closedir(d_cmd) ;
 
-        }
+        
+
+    }
 }
 tasks *  read_tasks (char * chemin) {
     tasks * TASKS = malloc (sizeof(tasks) * number_of_tasks(chemin)) ; 
@@ -199,7 +213,9 @@ tasks *  read_tasks (char * chemin) {
             tache.tm.HOURS = be32toh(hours);
             tache.tm.DAYSOFWEEK = daysofweek ; 
             tache.commandes = malloc(sizeof(command));
-            read_cmd(tache.commandes, chemin_tache) ; 
+            char chemin_cmd [256] ; 
+            snprintf(chemin_cmd , sizeof chemin_cmd , "%s/cmd", chemin_tache) ; 
+            read_cmd(tache.commandes, chemin_tache, chemin_cmd) ; 
             TASKS[i] = tache ;
             i++ ;  
         }
