@@ -1,0 +1,63 @@
+/*
+char chemin_erraid[256] , chemin_tasks[256] ,PATH1[256], PATH2[256] ; 
+
+int run = 1 ; 
+
+//initialiser les tubes de communications pour l'instant sans option -r
+void init_pipes() {
+    
+    
+    const char * user = getenv("USER") ; 
+    snprintf (chemin_erraid, sizeof chemin_erraid , "/tmp/%s/erraid/", user) ; 
+    if (mkdir(chemin_erraid, 0700) == -1 && errno != EEXIST) {
+        perror("mkdir");
+    }
+    snprintf(chemin_tasks, sizeof chemin_tasks , "%stasks/" , chemin_erraid) ;
+    if (mkdir(chemin_tasks, 0700) == -1 && errno != EEXIST) {
+        perror("mkdir");
+    }
+
+    char chemin2[256] ; 
+    snprintf(chemin2 ,sizeof chemin2, "%s/pipes/", chemin_erraid) ; 
+    if (mkdir(chemin2, 0700) == -1 && errno != EEXIST) {
+        perror("mkdir");
+    }
+
+
+    snprintf (PATH1, sizeof PATH1 , "%serraid-request-pipe", chemin2) ; 
+    snprintf(PATH2 , sizeof PATH2, "%serraid-reply-pipe", chemin2) ; 
+    if (mkfifo(PATH1, 0666) == -1 && errno != EEXIST) perror ("mkfifo request") ;
+    if (mkfifo(PATH2, 0666) == -1 && errno != EEXIST) perror ("mkfifo reply") ; 
+
+}
+
+int init_pipes_r(char * c) {
+    
+    snprintf (chemin_erraid, sizeof chemin_erraid , "%s/erraid/", c) ; 
+    if (mkdir(chemin_erraid, 0700) == -1 && errno != EEXIST) {
+        perror("mkdir");
+        return -1 ; 
+    }
+    char chemin2[256] ; 
+    snprintf(chemin2 ,sizeof chemin2, "%spipes/", chemin_erraid) ; 
+    if (mkdir(chemin2, 0700) == -1 && errno != EEXIST) {
+        perror("mkdir");
+        return -1 ; 
+    }
+
+    snprintf (PATH1, sizeof PATH1 , "%serraid-request-pipe", chemin2) ; 
+    snprintf(PATH2 , sizeof PATH2, "%serraid-reply-pipe", chemin2) ; 
+    if (mkfifo(PATH1, 0666) == -1 && errno != EEXIST) perror ("mkfifo request") ;
+    if (mkfifo(PATH2, 0666) == -1 && errno != EEXIST) perror ("mkfifo reply") ; 
+
+    return 1 ; 
+}
+*/
+
+/*
+int fd_request = open(PATH1, O_RDONLY); //lire la requete du client
+if (fd_request == -1) {exit(1) ; }
+int fd_reply = open(PATH2, O_WRONLY) ;  // ecrire la reponse pour le client
+if (fd_reply == -1) {exit(1) ; }
+
+*/

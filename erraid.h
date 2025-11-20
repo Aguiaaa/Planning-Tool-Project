@@ -1,16 +1,11 @@
 #ifndef ERRAID_H     // Protection contre les inclusions multiples
 #define  ERRAID_H   
 
-
 #include <stdint.h>
-
-
-
 
 typedef struct {
     uint32_t LENGTH ; 
-    uint8_t * DATA ; 
-
+    uint8_t * DATA ;
 } string ;
 
 typedef struct {
@@ -40,7 +35,6 @@ typedef struct {
     string chemin ; 
     timing tm ; 
     command * commandes ;
-
 } tasks ; 
 
 #endif
