@@ -160,10 +160,16 @@ int execute_cmd(command *cmd, const char * chemin_stdout, const char * chemin_st
         } fprintf(stderr, "Problème inattendu lors de l'exécution d'une commande.\n"); return -1;
 }
 void execute_task(tasks *T) {
-    char chemin_stdout[512];
-    char chemin_stderr[512];
-    snprintf(chemin_stdout, sizeof(chemin_stdout), "%s/stdout", (char*)T->chemin.DATA);
-    snprintf(chemin_stderr, sizeof(chemin_stderr), "%s/stderr", (char*)T->chemin.DATA);
-    int codesortie = execute_cmd(T->commandes, chemin_stdout, chemin_stderr);
-    log_execution((char*)T->chemin.DATA, codesortie);
+    pid_t pid = fork();
+    if (pid == 0) {
+        char chemin_stdout[512];
+        char chemin_stderr[512];
+        snprintf(chemin_stdout, sizeof(chemin_stdout), "%s/stdout", (char*)T->chemin.DATA);
+        snprintf(chemin_stderr, sizeof(chemin_stderr), "%s/stderr", (char*)T->chemin.DATA);
+        int codesortie = execute_cmd(T->commandes, chemin_stdout, chemin_stderr);
+        log_execution((char*)T->chemin.DATA, codesortie);
+    }
+    else if (pid<0) {
+        perror("fork");
+    }
 }
