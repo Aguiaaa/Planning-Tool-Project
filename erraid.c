@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include "erraid.h"
 #include <dirent.h>
+#include "task_runner.h"
 
 
 struct dirent *entry , *entry2 ; 
@@ -161,15 +162,16 @@ void read_cmd (command * c , char * chemin, char * chemin_cmd) {
             d_cmd = opendir(chemin_cmd) ; 
 
             while ((entry2 = readdir (d_cmd)) != NULL ) {
-                if (strcmp(entry2->d_name , ".") != 0 && strcmp(entry2->d_name , "..") != 0) {  
-                char chemin_sous_cmd [256]; 
-                snprintf(chemin_sous_cmd, sizeof chemin_sous_cmd, "%s/%s", chemin_cmd, entry2->d_name); 
-                if (stat(chemin_sous_cmd, &st) == 0 && S_ISDIR(st.st_mode)) {
-                    uint32_t i = (uint32_t)strtoul(entry2->d_name, NULL, 10);
-                    if (i < c->combinaison.ncmds) {
-                        read_cmd(&(c->combinaison.sous_command[i]) , chemin_sous_cmd, chemin_sous_cmd); 
+                if (strcmp(entry2->d_name, ".") != 0 && strcmp(entry2->d_name, "..") != 0) {
+
+                    char path[256];
+                    snprintf(path, sizeof path, "%s/%s", chemin_cmd, entry2->d_name);
+
+                    if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+                        uint32_t idx = strtoul(entry2->d_name, NULL, 10);
+
+                        read_cmd(&c->combinaison.sous_command[idx], path, path);
                     }
-                }
                 }
             }
             closedir(d_cmd) ;
@@ -189,11 +191,12 @@ tasks *  read_tasks (char * chemin) {
             char chemin_tache[256]; 
             snprintf(chemin_tache, sizeof chemin_tache , "%s/%s" ,chemin , entry->d_name ) ; 
             
-            uint32_t length = (uint32_t) (strlen(chemin) + strlen(entry->d_name) + 1) ; 
+            uint32_t length = strlen(chemin_tache);
             tache.chemin.DATA = malloc(length + 1);
-            memcpy(tache.chemin.DATA, chemin_tache, length + 1);
-            printf("chemin tache : %s/n ", tache.chemin.DATA) ; 
-            tache.chemin.LENGTH = length ;  
+            strcpy((char*)tache.chemin.DATA, chemin_tache);
+            tache.chemin.LENGTH = length;
+            printf("chemin tache : %s\n ", tache.chemin.DATA) ; 
+           
             
             char chemin_fichier_timing[256] ;
             snprintf (chemin_fichier_timing , sizeof chemin_fichier_timing , "%s/timing" , chemin_tache ) ;  
@@ -242,10 +245,9 @@ int main (int argc, char *argv[]) {
         return 1;
     }
 
-    //TEST pour connaitre le chemin du dossier de stockage /tasks 
+
     printf("Chemin tasks = %s\n", chemin_tasks);
 
-    //debut de TEST pour read_tasks()
     uint64_t nbtasks = number_of_tasks(chemin_tasks);
     printf("Nombre de tâches trouvées : %llu\n",
            (unsigned long long)nbtasks);
@@ -255,24 +257,37 @@ int main (int argc, char *argv[]) {
         write(2, "Erreur dans read_tasks\n", 24);
         return 1;
     }
-    for (uint64_t i = 0; i < nbtasks; ++i) {
-        printf("Task %llu:\n", (unsigned long long)T[i].ID);
-        printf("  chemin = %.*s\n",
-               T[i].chemin.LENGTH,
-               T[i].chemin.DATA ? (char*)T[i].chemin.DATA : "(null)");
-        printf("  MINUTES = 0x%016llx\n",
-               (unsigned long long)T[i].tm.MINUTES);
-        printf("  HOURS   = 0x%08x\n", T[i].tm.HOURS);
-        printf("  DOW     = 0x%02x\n", T[i].tm.DAYSOFWEEK);
+    while (1) {
+        time_t t = time(NULL);
+        struct tm now;
+        localtime_r(&t, &now);
 
-        printf("  commande = ");
-        print_command(T[i].commandes);
-        putchar('\n');
+        if (now.tm_sec == 0)
+            break;
+
+        sleep(1);
     }
+
+    while (1) {
+        
+
+        time_t t = time(NULL);
+        struct tm now;
+        localtime_r(&t, &now);
+        uint64_t i ;
+        for (i = 0; i < nbtasks; i++){
+            if (should_run(&T[i], &now)) {
+                printf("execution de la tache : %llu\n", (unsigned long long)T[i].ID);
+                execute_task(&T[i]);
+            }
+        }
+
+        sleep(60 - now.tm_sec) ; 
+    }
+
 
     free(T);
 
-    //fin de TEST pour read_tasks()
 
     /*
     int fd_request = open(PATH1, O_RDONLY); //lire la requete du client 
