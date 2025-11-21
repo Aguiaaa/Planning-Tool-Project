@@ -11,6 +11,8 @@
 #include "erraid.h"
 #include "lecteur.h"
 
+/* Auteur du module lecteur: Amine */
+
 struct dirent *entry , *entry2 ; 
 struct stat st;
 
