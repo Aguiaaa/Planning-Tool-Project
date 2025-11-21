@@ -6,6 +6,7 @@
 #include "lecteur.h"
 #include "executor.h"
 
+/* run_scheduler s'exécute chaque minute. Pour modifier ce comportement changer la valeur passée en arg à sleep */
 void run_scheduler(char *chemin_tasks) {
     uint64_t nbtasks = number_of_tasks(chemin_tasks);
     tasks *T = read_tasks(chemin_tasks);
@@ -19,7 +20,7 @@ void run_scheduler(char *chemin_tasks) {
                 execute_task(&T[i]);
             }
         }
-        printf("Tour de boucle.\n");
+        printf("Tour de boucle .\n");
         sleep(60);
     }
     free_tasks(T, nbtasks);
