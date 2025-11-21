@@ -137,7 +137,7 @@ tasks *  read_tasks (char * chemin) {
             uint32_t length = (uint32_t) (strlen(chemin) + strlen(entry->d_name) + 1) ; 
             tache.chemin.DATA = malloc(length + 1);
             memcpy(tache.chemin.DATA, chemin_tache, length + 1);
-            printf("chemin tache : %s/n ", tache.chemin.DATA) ; 
+            printf("chemin tache : %s\n ", tache.chemin.DATA) ;
             tache.chemin.LENGTH = length ;  
             
             char chemin_fichier_timing[256] ;

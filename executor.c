@@ -129,8 +129,8 @@ int execute_cmd(command *cmd, const char * chemin_stdout, const char * chemin_st
     				argv[i] = (char*)cmd->args.ARGV[i].DATA;
     			}
     			argv[cmd->args.ARGC] = NULL;
-                int fd_out = open((char*)chemin_stdout, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-                int fd_err = open((char*)chemin_stderr, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                int fd_out = open((char*)chemin_stdout, O_WRONLY | O_CREAT |O_APPEND, 0644);
+                int fd_err = open((char*)chemin_stderr, O_WRONLY | O_CREAT | O_APPEND, 0644);
                 dup2(fd_out, STDOUT_FILENO);
                 dup2(fd_err, STDERR_FILENO);
                 close(fd_out);
@@ -168,6 +168,7 @@ void execute_task(tasks *T) {
         snprintf(chemin_stderr, sizeof(chemin_stderr), "%s/stderr", (char*)T->chemin.DATA);
         int codesortie = execute_cmd(T->commandes, chemin_stdout, chemin_stderr);
         log_execution((char*)T->chemin.DATA, codesortie);
+         _exit(0);
     }
     else if (pid<0) {
         perror("fork");
