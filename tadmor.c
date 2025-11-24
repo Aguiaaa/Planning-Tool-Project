@@ -12,7 +12,11 @@
 
 
 int main(int argc, char *argv[]) {
+<<<<<<< HEAD
    
+=======
+
+>>>>>>> boucle_execution
 
 
 }

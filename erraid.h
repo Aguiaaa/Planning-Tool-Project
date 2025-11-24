@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 #ifndef ERRAID_H    
+=======
+#ifndef ERRAID_H  
+>>>>>>> boucle_execution
 #define  ERRAID_H   
 
 #include <stdint.h>
