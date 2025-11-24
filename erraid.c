@@ -10,7 +10,7 @@ int main(int argc, char *argv[]) {
     char *chemin_tasks;
     if (argc == 1) {
         char *user = getenv("USER");
-        snprintf(chemin_aux, sizeof chemin_aux, "/tmp/%s/erraid/tasks", user);
+        snprintf(chemin_aux, sizeof chemin_aux, "/tmp/%s/erraid", user);
         chemin_tasks = chemin_aux;
     } else if (argc == 3 && strcmp(argv[1], "-r") == 0) {
         chemin_tasks = argv[2];
