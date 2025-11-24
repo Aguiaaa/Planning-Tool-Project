@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include "erraid.h"
 #include <dirent.h>
+#include <sys/wait.h>  
 #include "task_runner.h"
 
 
@@ -96,11 +97,10 @@ void read_cmd (command * c , char * chemin, char * chemin_cmd) {
                 char path[256];
                 snprintf(path, sizeof path, "%s/%s", chemin_cmd, entry2->d_name);
                 stat(path, &st);
-                if (S_ISDIR(st.st_mode)) { printf ("sous commande : %s\n", entry2->d_name) ; number_of_cmd++ ; }
+                if (S_ISDIR(st.st_mode)) {  number_of_cmd++ ; }
                 }
                 
             }
-            printf("nombres de sous comamndes : %d\n", number_of_cmd) ; 
             closedir(d_cmd) ; 
             c->combinaison.ncmds = (uint32_t) number_of_cmd ; 
             c->combinaison.sous_command = malloc(number_of_cmd * sizeof(command));
@@ -175,16 +175,12 @@ tasks *  read_tasks (char * chemin) {
 
 
 int main (int argc, char *argv[]) {
-    char * chemin_tasks ; 
+    char chemin_tasks[256] ; 
     if (argc == 1) {
-        char * user = getenv("USER") ;
-        char chemin_aux[256] ;  
-        snprintf (chemin_aux , sizeof chemin_aux, "/tmp/%s/erraid/tasks", user) ; 
-        chemin_tasks = chemin_aux ; 
-        printf ("%s\n", chemin_tasks) ; 
+        char * user = getenv("USER") ;  
+        snprintf (chemin_tasks , sizeof chemin_tasks, "/tmp/%s/erraid/tasks", user) ; 
     } else if (argc == 3 && strcmp(argv[1], "-r") == 0) {
-        chemin_tasks = argv[2] ; 
-        printf ("%s\n", chemin_tasks) ; 
+        snprintf (chemin_tasks , sizeof chemin_tasks, "%s/tasks", argv[2]) ; 
     } else {
         write(2, "Usage: ./erraid [-r BASE_PATH]\n", 32 );
         return 1;
@@ -202,32 +198,43 @@ int main (int argc, char *argv[]) {
         write(2, "Erreur dans read_tasks\n", 24);
         return 1;
     }
-    while (1) {
-        time_t t = time(NULL);
-        struct tm now;
-        localtime_r(&t, &now);
 
-        if (now.tm_sec == 0)
-            break;
 
-        sleep(1);
-    }
+    time_t now_raw = time(NULL);
+    struct tm *now_tm = localtime(&now_raw);
+    int seconds = 60 - now_tm->tm_sec;
+    printf("Synchronisation de %d secondes...\n", seconds);
+    sleep(seconds);
 
     while (1) {
-        
+        now_raw = time(NULL);
+        struct tm tm_actuel;
+        localtime_r(&now_raw, &tm_actuel);
 
-        time_t t = time(NULL);
-        struct tm now;
-        localtime_r(&t, &now);
-        uint64_t i ;
-        for (i = 0; i < nbtasks; i++){
-            if (should_run(&T[i], &now)) {
-                printf("execution de la tache : %llu\n", (unsigned long long)T[i].ID);
-                execute_task(&T[i]);
+        for (uint64_t i = 0; i < nbtasks; i++) {
+            if (should_run(&T[i], &tm_actuel)) {
+                printf("Lancement tache ID %llu\n", (unsigned long long)T[i].ID);
+
+                pid_t pid = fork();
+
+                if (pid == 0) {
+                    pid_t petit_fils = fork();
+                    
+                    if (petit_fils == 0) {
+                        execute_task(&T[i]);
+                        exit(0); 
+                    }
+                    exit(0); 
+                }
+                if (pid > 0) {
+                    waitpid(pid, NULL, 0);
+                }
             }
         }
-
-        sleep(60 - now.tm_sec) ; 
+        now_raw = time(NULL);
+        localtime_r(&now_raw, &tm_actuel);
+        seconds = 60 - tm_actuel.tm_sec;
+        if (seconds > 0) sleep(seconds);
     }
 
 
