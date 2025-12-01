@@ -74,7 +74,7 @@ void read_cmd (command * c , char * chemin, char * chemin_cmd) {
                 uint32_t length ; 
                 n = read (fd_argv , &length , 4) ;
                 length = be32toh(length);
-                c->args.ARGV[i].LENGTH = be32toh(length) ;
+                c->args.ARGV[i].LENGTH = length ;
                 c->args.ARGV[i].DATA = malloc (length + 1) ;  
                 read(fd_argv, c->args.ARGV[i].DATA, length);
                 c->args.ARGV[i].DATA[length] = '\0';
