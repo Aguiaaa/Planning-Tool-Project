@@ -1,75 +1,38 @@
 #include "tadmor.h"
 #include "erraid.h"
-
+#include "protocole.h"
 
 extern char *optarg;
 
-ssize_t read_all(int fd, void *buf, size_t count) {
-    size_t total = 0;
-    ssize_t n;
-    while (total < count) {
-        n = read(fd, (char*)buf + total, count - total);
-        if (n <= 0) return -1;
-        total += n;
+void print_timing(uint64_t val, int max) {
+    
+    if (val == ((1ULL << max) - 1)) { 
+        printf("*"); 
+        return; 
     }
-    return total;
-}
 
-uint16_t read_u16(int fd) {
-    uint16_t v;
-    if (read_all(fd, &v, 2) < 0) exit(1);
-    return be16toh(v);
-}
-
-uint32_t read_u32(int fd) {
-    uint32_t v;
-    if (read_all(fd, &v, 4) < 0) exit(1);
-    return be32toh(v);
-}
-
-uint64_t read_u64(int fd) {
-    uint64_t v;
-    if (read_all(fd, &v, 8) < 0) exit(1);
-    return be64toh(v);
-}
-void print_timing_field(uint64_t val, int max_bits) {
-    bool all_set = true;
-    for (int i = 0; i < max_bits; i++) {
-        if (!((val >> i) & 1)) {
-            all_set = false;
-            break;
+    int first = 1;
+    for (int i = 0; i < max; i++) {
+        if ((val >> i) & 1) { 
+            if (!first) printf(",");
+            printf("%d", i);
+            first = 0;
         }
     }
-
-    if (all_set) {
-        printf("*");
-    } else {
-        bool first = true;
-        bool any = false;
-        for (int i = 0; i < max_bits; i++) {
-            if ((val >> i) & 1) {
-                if (!first) printf(",");
-                printf("%d", i);
-                first = false;
-                any = true;
-            }
-        }
-        if (!any) printf("-");
-    }
+    if (first) printf("-"); 
 }
 
-void print_cmd_recursive(int fd) {
+void print_cmd(int fd) {
     uint16_t type = read_u16(fd);
 
     if (type == 0x5349) { 
         uint32_t argc = read_u32(fd);
         for (uint32_t i = 0; i < argc; i++) {
             uint32_t len = read_u32(fd);
-            char *buf = malloc(len + 1);
+            char buf[len + 1];
             read_all(fd, buf, len);
             buf[len] = '\0';
             printf("%s", buf);
-            free(buf);
             if (i < argc - 1) printf(" ");
         }
     } 
@@ -105,13 +68,12 @@ int main(int argc, char *argv[]) {
                     perror("write req") ;
                     exit(1) ;
                 } 
-                close(fd_req) ;
-                printf("j'envoie la demande au demon un peu de patience !\n") ; 
+                close(fd_req) ; 
                 fd_rep = open (rep , O_RDONLY) ;
                 if (fd_rep == -1) { perror("open rep"); exit(1); }
 
-                uint16_t anstype = read_u16(fd_rep);
-                if (anstype == 0x4F4B) { 
+                uint16_t reponse = read_u16(fd_rep);
+                if (reponse == 0x4F4B) { 
                     uint32_t nbtasks = read_u32(fd_rep);
                     
                     for (uint32_t i = 0; i < nbtasks; i++) {
@@ -134,7 +96,7 @@ int main(int argc, char *argv[]) {
                         printf("\n");
                     }
                 } else {
-                    fprintf(stderr, "Erreur serveur: 0x%x\n", anstype);
+                    fprintf(stderr, "Erreur du demon: 0x%x\n", reponse);
                 }
 
                 close(fd_rep);
