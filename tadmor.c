@@ -40,7 +40,7 @@ void print_cmd(int fd) {
         uint32_t ncmds = read_u32(fd);
         printf("(");
         for (uint32_t i = 0; i < ncmds; i++) {
-            print_cmd_recursive(fd);
+            print_cmd(fd);
             if (i < ncmds - 1) printf("; ");
         }
         printf(")");
@@ -85,14 +85,14 @@ int main(int argc, char *argv[]) {
                         read_all(fd_rep, &day, 1);
                         printf("%llu: ", (unsigned long long)id);
 
-                        print_timing_field(min, 60);
+                        print_timing(min, 60);
                         printf(" ");
-                        print_timing_field((uint64_t)hour, 24); 
+                        print_timing((uint64_t)hour, 24); 
                         printf(" ");
-                        print_timing_field((uint64_t)day, 7); 
+                        print_timing((uint64_t)day, 7); 
                         printf(" ");
 
-                        print_cmd_recursive(fd_rep);
+                        print_cmd(fd_rep);
                         printf("\n");
                     }
                 } else {
