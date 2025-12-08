@@ -27,6 +27,62 @@ void write_cmd_recursive(int fd, command *cmd) {
     }
 }
 
+// --- Gère la demande d'historique (-x) ---
+void handle_history(char *rep_path, char *base_path, uint64_t id) {
+    int fd_rep = open(rep_path, O_WRONLY);
+    if (fd_rep == -1) return;
+
+    char hist_file[512];
+    snprintf(hist_file, sizeof(hist_file), "%s/%llu.hist", base_path, (unsigned long long)id);
+
+    int fd_hist = open(hist_file, O_RDONLY);
+    if (fd_hist == -1) {
+        write_u16(fd_rep, 0x4552); 
+    } else {
+        write_u16(fd_rep, 0x4F4B); 
+        
+        struct stat st;
+        fstat(fd_hist, &st);
+        uint32_t nb_execs = (uint32_t)(st.st_size / 10);
+        write_u32(fd_rep, nb_execs);
+
+        char buf[1024];
+        ssize_t n;
+        while ((n = read(fd_hist, buf, sizeof(buf))) > 0) {
+            write(fd_rep, buf, n);
+        }
+        close(fd_hist);
+    }
+    close(fd_rep);
+}
+
+void handle_output(char *rep_path, char *base_path, uint64_t id, char *suffixe) {
+    int fd_rep = open(rep_path, O_WRONLY);
+    if (fd_rep == -1) return;
+
+    char out_file[512];
+    snprintf(out_file, sizeof(out_file), "%s/%llu%s", base_path, (unsigned long long)id, suffixe);
+
+    int fd_file = open(out_file, O_RDONLY);
+    if (fd_file == -1) {
+        write_u16(fd_rep, 0x4552); 
+    } else {
+        write_u16(fd_rep, 0x4F4B); 
+        
+        struct stat st;
+        fstat(fd_file, &st);
+        write_u32(fd_rep, (uint32_t)st.st_size); 
+
+        char buf[1024];
+        ssize_t n;
+        while ((n = read(fd_file, buf, sizeof(buf))) > 0) {
+            write(fd_rep, buf, n);
+        }
+        close(fd_file);
+    }
+    close(fd_rep);
+}
+
 void handle_ls(char *rep_path, tasks *T, uint64_t nbtasks) {
     int fd_rep = open(rep_path, O_WRONLY);
     if (fd_rep == -1) return;
@@ -169,6 +225,33 @@ if (mkfifo (req , 0622) == -1) {
             if (opcode == 0x4C53) { // LS
                 printf("[Client] Reçu LS\n");
                 handle_ls(rep, T, nbtasks);
+            }
+        }
+        else if (opcode == 0x5458) { // x
+                uint64_t id_be, id;
+                read(fd_req, &id_be, 8); 
+                id = be64toh(id_be);
+                
+                printf("[Client] Historique demandé pour ID %llu\n", (unsigned long long)id);
+                handle_history(rep, chemin_tasks, id);
+            }
+
+            else if (opcode == 0x534F) { // o 
+                uint64_t id_be, id;
+                read(fd_req, &id_be, 8);
+                id = be64toh(id_be);
+
+                printf("[Client] Stdout demandé pour ID %llu\n", (unsigned long long)id);
+                handle_output(rep, chemin_tasks, id, ".out");
+            }
+
+            else if (opcode == 0x5345) { // e
+                uint64_t id_be, id;
+                read(fd_req, &id_be, 8);
+                id = be64toh(id_be);
+
+                printf("[Client] Stderr demandé pour ID %llu\n", (unsigned long long)id);
+                handle_output(rep, chemin_tasks, id, ".err");
             }
         }
     }
