@@ -2,65 +2,60 @@
 
 ## 1. Vue d'ensemble
 
-Le projet est constitué de deux programmes distincts communiquant entre eux via des tubes nommés (FIFO), suivant le modèle **Client-Serveur** local :
-* **`erraid` (le démon)** : Charge de planifier et d'exécuter les tâches. Il tourne en tâche de fond.
-* **`tadmor` (le client)** : Interface utilisateur pour envoyer des requêtes au démon.
+Le projet implémente une architecture **Client-Serveur** locale pour la planification de tâches.
+La communication repose sur l'utilisation de **tubes nommés (FIFO)**, car ils sont « de même nature que les tubes anonymes, mais avec une existence dans le SGF » et sont « accessibles par des processus non nécessairement apparentés ».
 
-Ce choix d'architecture repose sur l'utilisation des **tubes nommés** (`mkfifo`) pour permettre la communication entre processus non apparentés, comme vu dans le **Cours 10 (p. 7-11)**.
+* **`erraid` (le démon)** : Serveur persistant qui gère l'exécution planifiée.
+* **`tadmor` (le client)** : Interface utilisateur ponctuelle.
 
 ---
 
 ## 2. Structures de Données
 
-Les données sont structurées pour refléter l'arborescence de fichiers décrite dans le sujet. Les structures principales sont définies dans `erraid.h` :
-
-* **`tasks`** : Représente une tâche complète (ID, contraintes horaires `timing`, commande racine).
-* **`command`** : Structure récursive (arbre) permettant de gérer les commandes complexes (séquences).
+Les données sont structurées pour refléter l'arborescence décrite dans le sujet. Les structures principales (`tasks` et `command` dans `erraid.h`) utilisent une définition récursive pour gérer les séquences de commandes complexes.
 
 ---
 
 ## 3. Fonctionnement du Démon (`erraid`)
 
-Le démon implémente une boucle d'événements basée sur les signaux et les interruptions d'appels système.
+Le démon implémente une boucle principale basée sur les signaux et les interruptions d'appels système.
 
-### 3.1. Initialisation
-Au démarrage, `erraid` :
-1.  Parse l'arborescence des tâches (`parsing_tasks.c`).
-2.  Crée les tubes nommés (requête et réponse) avec `mkfifo`.
-3.  Configure les gestionnaires de signaux via **`sigaction`** (plus fiable que `signal`, cf. **Cours 12 p. 3**) :
-    * `SIGALRM` : Pour la planification périodique.
-    * `SIGINT`/`SIGTERM` : Pour un arrêt propre.
-    * `SIGPIPE` : Ignoré pour éviter la terminaison brutale en cas de déconnexion client (**Cours 10 p. 3**).
+### 3.1. Gestion des Signaux
+La configuration des signaux utilise la primitive **`sigaction`** plutôt que `signal()`, car cette dernière est considérée comme une « primitive obsolète et absolument pas fiable ».
 
-### 3.2. Boucle Principale et Multiplexage
-Le démon doit attendre simultanément une échéance temporelle (minute suivante) et des requêtes client.
-* Nous utilisons un appel système `read()` bloquant sur le tube de requête.
-* Nous armons une alarme (`alarm()`).
-* Si l'alarme sonne, `read()` est interrompu et retourne l'erreur **`EINTR`** (**Cours 12 p. 7**). Le démon intercepte cette interruption, lance les tâches, puis reprend son attente.
+* **`SIGALRM`** : Utilisé pour la planification.
+* **`SIGPIPE`** : Ignoré, car « une tentative d'écriture dans un tube sans lecteur provoque l'envoi de SIGPIPE », ce qui tuerait le démon si un client se déconnectait.
 
-**Choix technique (Tube bloquant) :** Le tube de requête est ouvert en mode `O_RDWR`. Cela permet de garder un écrivain potentiel en permanence et d'éviter que `read` ne renvoie `0` (EOF) en boucle, une astuce mentionnée pour Linux dans le **Cours 10 (p. 9)**.
+### 3.2. Gestion de l'Attente (Timer et Requêtes)
+Le démon doit attendre soit une requête du client, soit que le temps s'écoule (nouvelle minute).
+Nous utilisons un appel système `read()` bloquant. Lorsqu'une alarme survient, « un appel système (bloquant) interrompu par la réception d'un signal capté ne reprend pas: il retourne -1 et errno=EINTR ».
+Notre boucle principale utilise ce mécanisme pour se réveiller à chaque minute (via l'erreur `EINTR`) tout en restant en attente de données sur le tube.
+
+**Note sur l'ouverture :** Le tube est ouvert en `O_RDWR` pour éviter que `read` ne retourne 0 s'il n'y a aucun écrivain, une astuce mentionnée dans le cours pour Linux où « une ouverture en O_RDWR est possible » pour manipuler le comportement bloquant.
 
 ### 3.3. Exécution des Tâches (`task_runner.c`)
-L'exécution utilise une approche récursive :
-* **Création de processus :** Utilisation de `fork()` et `execvp()` (**Cours 7 p. 5**).
-* **Redirections :** Les sorties `stdout` et `stderr` sont redirigées vers les fichiers de logs via `dup2()` avant le recouvrement (**Cours 3 p. 10**).
-* **Gestion des Zombies (Double Fork) :** Pour éviter de gérer les signaux `SIGCHLD` ou de bloquer sur `wait`, nous utilisons la technique du **double fork** : le démon crée un fils, qui crée un petit-fils pour la commande puis termine immédiatement. Le petit-fils est alors adopté par `init`. Cette stratégie est explicitement recommandée pour les démons dans le **Cours 7 (p. 18)**.
-* **Nettoyage :** Nous appliquons la "règle d'or" consistant à fermer les descripteurs hérités inutiles (comme le tube de requête) dans les processus fils (**Cours 9 p. 9**).
+L'exécution exploite la séparation des étapes de création de processus sous UNIX :
+1.  **Clonage (`fork`)** : Création d'un processus dont « l'espace d'adressage [...] est (initialement) une copie de celui du père ».
+2.  **Redirections** : Entre le clonage et le recouvrement, nous modifions la table des descripteurs (avec `dup2`) pour rediriger `stdout` et `stderr`, car cela « laisse une opportunité pour modifier certaines choses impérativement parmi celles qui ne seront pas écrasées par le recouvrement ».
+3.  **Recouvrement (`execvp`)** : « Remplacement de toute la mémoire par un nouveau segment de code ».
+
+**Stratégie du "Double Fork" :**
+Pour éviter les zombies sans bloquer le démon, nous utilisons le **double fork**, défini dans le cours comme une « stratégie pour ne pas avoir à attendre le fils [...] créer un fils puis un petit-fils [...] tuer le fils : le petit-fils est alors adopté par le processus 1 ».
+
+**Gestion des ressources :**
+Nous appliquons scrupuleusement la « Règle d'or: toujours libérer les descripteurs inutiles » en fermant les tubes hérités dans les processus fils.
 
 ---
 
 ## 4. Fonctionnement du Client (`tadmor`)
 
-Le client suit un flux séquentiel :
-1.  Ouverture du tube requête (`O_WRONLY`).
-2.  Envoi de la requête formatée (Big Endian).
-3.  Ouverture du tube réponse (`O_RDONLY`). Note : cette ouverture bloque tant que le démon n'ouvre pas le tube en écriture, assurant une synchronisation (**Cours 10 p. 9**).
-4.  Lecture et affichage de la réponse.
+Le client utilise une synchronisation naturelle à l'ouverture : comme « une ouverture en écriture bloque [...] tant qu'il n'y a pas de lecteur », le client attend que le démon soit prêt avant d'envoyer sa requête.
+
+Le protocole utilise le format **Big Endian** pour les entiers, assurant la portabilité des échanges binaires.
 
 ---
 
-## 5. Gestion des Erreurs et Robustesse
+## 5. Robustesse
 
-* **Interruptions :** La fonction utilitaire `read_all` gère explicitement le cas `errno == EINTR` pour relancer la lecture si elle est interrompue par un signal, garantissant la fiabilité des échanges (**Cours 12 p. 7**).
-* **Variable globale :** L'arrêt de la boucle principale se fait via une variable de type `volatile sig_atomic_t` modifiée par le handler, assurant l'atomicité de l'opération (**Cours 12 p. 6**).
-* **Nettoyage :** En fin d'exécution, le démon supprime les tubes nommés avec `unlink` pour laisser le système propre (**Cours 6 p. 7**).
+* **Sécurité des signaux :** Le gestionnaire de signal (`gestion_arret`) se limite à « la modification d'une variable globale dédiée de type volatile sig_atomic_t », respectant les contraintes de sécurité.
+* **Nettoyage :** Le démon supprime les tubes nommés avec `unlink` à sa terminaison.
