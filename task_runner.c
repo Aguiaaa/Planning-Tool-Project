@@ -52,6 +52,7 @@ int run(tasks *T, command *cmd) {
             args[cmd->args.ARGC] = NULL;
 
             execvp(args[0], args);
+            perror("Erreur execvp");
             exit(1); 
         } 
         

@@ -23,6 +23,8 @@
 
 
 
+#define TYPE_SIMPLE  0x5349 // 'SI'
+#define TYPE_SEQ     0x5351 // 'SQ'
 
 
 typedef struct {

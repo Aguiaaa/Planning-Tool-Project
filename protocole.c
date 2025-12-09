@@ -3,13 +3,19 @@
 #include <endian.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <errno.h>
 
 ssize_t read_all(int fd, void *buf, size_t count) {
     size_t total = 0;
     ssize_t n;
     while (total < count) {
         n = read(fd, (char*)buf + total, count - total);
-        if (n <= 0) return -1;
+        
+        if (n == -1) {
+            if (errno == EINTR) continue;
+            return -1; 
+        }
+        if (n == 0) return -1;         
         total += n;
     }
     return total;
