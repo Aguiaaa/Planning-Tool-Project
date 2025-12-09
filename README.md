@@ -113,23 +113,6 @@ tadmor -p /tmp/$USER/erraid/pipes -l
 
 ---
 
-## Fonctionnalités réalisées — Jalon 2
-
-### Démon (`erraid`)
-- Lecture d’une arborescence statique contenant les tâches  
-- Exécution des tâches simples et séquentielles  
-- Gestion des pipes nommés  
-- Mise à jour des fichiers logs (codes retour, stdout, stderr)  
-- Réponses aux requêtes consultatives (`-l`, `-x`, `-o`, `-e`)
-
-### Client (`tadmor`)
-- Construction des requêtes à destination du démon  
-- Lecture et affichage des réponses  
-- Options consultatives entièrement prises en charge  
-- Support de l’option `-p` pour la configuration des pipes
-
----
-
 ## Notes
 
 - Les fonctionnalités de création/suppression de tâches (`-c`, `-s`, `-r`, etc.) seront implémentées au **rendu final**.  
