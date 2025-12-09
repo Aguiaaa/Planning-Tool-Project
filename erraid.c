@@ -11,13 +11,13 @@ char req [256] ; char rep [256] ;
 
 void write_cmd_recursive(int fd, command *cmd) {
     write_u16(fd, cmd->type);
-    if (cmd->type == 0x5349) {
+    if (cmd->type == TYPE_SIMPLE) {
         write_u32(fd, cmd->args.ARGC);
         for (uint32_t i = 0; i < cmd->args.ARGC; i++) {
             write_u32(fd, cmd->args.ARGV[i].LENGTH);
             write(fd, cmd->args.ARGV[i].DATA, cmd->args.ARGV[i].LENGTH);
         }
-    } else if (cmd->type == 0x5351) { // SQ
+    } else if (cmd->type == TYPE_SEQ) { 
         write_u32(fd, cmd->combinaison.ncmds);
         for (uint32_t i = 0; i < cmd->combinaison.ncmds; i++) {
             write_cmd_recursive(fd, &cmd->combinaison.sous_command[i]);
@@ -25,51 +25,25 @@ void write_cmd_recursive(int fd, command *cmd) {
     }
 }
 
-void handle_history(char *rep_path, char *base_path, uint64_t id) {
+void traiter_xoe(char *rep_path, char *base_path, uint64_t id, char *filename) {
     int fd_rep = open(rep_path, O_WRONLY);
     if (fd_rep == -1) return;
 
-    char hist_file[512];
-    snprintf(hist_file, sizeof(hist_file), "%s/%llu/times-exitcodes", base_path, (unsigned long long)id) ; 
+    char file_path[512];
+    snprintf(file_path, sizeof(file_path), "%s/%llu/%s", base_path, (unsigned long long)id, filename);
 
-    int fd_hist = open(hist_file, O_RDONLY);
-    if (fd_hist == -1) {
-        write_u16(fd_rep, 0x4552); 
-    } else {
-        write_u16(fd_rep, 0x4F4B); 
-        
-        struct stat st;
-        fstat(fd_hist, &st);
-        uint32_t nb_execs = (uint32_t)(st.st_size / 10);
-        write_u32(fd_rep, nb_execs);
-
-        char buf[1024];
-        ssize_t n;
-        while ((n = read(fd_hist, buf, sizeof(buf))) > 0) {
-            write(fd_rep, buf, n);
-        }
-        close(fd_hist);
-    }
-    close(fd_rep);
-}
-
-void handle_output(char *rep_path, char *base_path, uint64_t id, char *suffixe) {
-    int fd_rep = open(rep_path, O_WRONLY);
-    if (fd_rep == -1) return;
-
-    char out_file[512];
-    snprintf(out_file, sizeof(out_file), "%s/%llu/%s", base_path, (unsigned long long)id, suffixe);
-
-    int fd_file = open(out_file, O_RDONLY);
+    int fd_file = open(file_path, O_RDONLY);
     if (fd_file == -1) {
-        write_u16(fd_rep, 0x4552); 
+        write_u16(fd_rep, REP_ERR); 
     } else {
-        write_u16(fd_rep, 0x4F4B); 
-        
+        write_u16(fd_rep, REP_OK); 
         struct stat st;
         fstat(fd_file, &st);
-        write_u32(fd_rep, (uint32_t)st.st_size); 
-
+        if (strcmp(filename, "times-exitcodes") == 0) {
+             write_u32(fd_rep, (uint32_t)(st.st_size / 10));
+        } else {
+             write_u32(fd_rep, (uint32_t)st.st_size);
+        }
         char buf[1024];
         ssize_t n;
         while ((n = read(fd_file, buf, sizeof(buf))) > 0) {
@@ -80,7 +54,7 @@ void handle_output(char *rep_path, char *base_path, uint64_t id, char *suffixe) 
     close(fd_rep);
 }
 
-void handle_ls(char *rep_path, tasks *T, uint64_t nbtasks) {
+void lister_taches(char *rep_path, tasks *T, uint64_t nbtasks) {
     int fd_rep = open(rep_path, O_WRONLY);
     if (fd_rep == -1) return;
 
@@ -96,13 +70,8 @@ void handle_ls(char *rep_path, tasks *T, uint64_t nbtasks) {
     }
     close(fd_rep);
 }
-void handler_alarm(int sig) {
+void gestion_alarme(int sig) {
     (void)sig; 
-}
-
-void handler_arret(int sig) {
-    (void)sig;
-    running = 0; 
 }
 
 int main (int argc, char *argv[]) {
@@ -110,22 +79,7 @@ int main (int argc, char *argv[]) {
     char * user = getenv("USER") ;  
     snprintf (chemin_tasks , sizeof chemin_tasks, "/tmp/%s/erraid/tasks", user) ; 
     snprintf(chemin_pipes, sizeof chemin_pipes, "/tmp/%s/erraid/pipes", user);
-    /*if (argc == 1) {
-        char * user = getenv("USER") ;  
-        snprintf (chemin_tasks , sizeof chemin_tasks, "/tmp/%s/erraid/tasks", user) ; 
-        snprintf(chemin_pipes, sizeof chemin_pipes, "/tmp/%s/erraid/pipes", user);  
 
-    } else if (argc == 3 && strcmp(argv[1], "-r") == 0) {
-        snprintf (chemin_tasks , sizeof chemin_tasks, "%s/tasks", argv[2]) ;
-        snprintf(chemin_pipes, sizeof chemin_pipes, "%s/pipes", argv[2]);  
-    }
-       else if (argc == 3 && strcmp(argv[1], "-p") == 0) {
-            snprintf(chemin_pipes, sizeof chemin_pipes, "%s/pipes", argv[2]);  
-    
-    } else {
-        write(2, "Usage: ./erraid [-r BASE_PATH]\n", 32 );
-        return 1;
-    }*/
     int opt;  
     while ((opt = getopt(argc, argv, "r:p:")) != -1) {
         switch (opt) {
@@ -142,7 +96,6 @@ int main (int argc, char *argv[]) {
                 exit(EXIT_FAILURE);
         }
     }
-
 
     printf("Chemin tasks = %s\n", chemin_tasks);
     printf("Chemin pipes = %s\n", chemin_pipes);
@@ -176,7 +129,7 @@ if (mkfifo (req , 0622) == -1) {
     sigaction(SIGPIPE, &sa_ign, NULL);
 
     struct sigaction sa_alarm;
-    sa_alarm.sa_handler = handler_alarm;
+    sa_alarm.sa_handler = gestion_alarme;
     sigemptyset(&sa_alarm.sa_mask);
 
     sa_alarm.sa_flags = 0; 
@@ -193,15 +146,13 @@ if (mkfifo (req , 0622) == -1) {
         time_t now = time(NULL);
         struct tm tm_now;
         localtime_r(&now, &tm_now);
-        int seconds_to_sleep = 60 - tm_now.tm_sec;
+        int sleep = 60 - tm_now.tm_sec;
         
-        alarm(seconds_to_sleep); 
+        alarm(sleep); 
 
         uint16_t opcode_be;
         ssize_t n = read(fd_req, &opcode_be, 2);
         uint16_t opcode = be16toh(opcode_be);
-
-
 
         alarm(0);
 
@@ -212,6 +163,7 @@ if (mkfifo (req , 0622) == -1) {
             for (uint64_t i = 0; i < nbtasks; i++) {
                 if (should_run(&T[i], &tm_now)) {
                     if (fork() == 0) {
+                        close(fd_req);
                         if (fork() == 0) { execute_task(&T[i]); exit(0); }
                         exit(0);
                     }
@@ -222,35 +174,35 @@ if (mkfifo (req , 0622) == -1) {
         
         else if (n == 2 ) {
 
-            if ( opcode == 0x4C53) {
+            if ( opcode == LIST) { // l 
                 printf("[Client] Reçu LS\n");
-                handle_ls(rep, T, nbtasks);
+                lister_taches(rep, T, nbtasks);
             }
-            else if (opcode == 0x5458) { // x
+            else if (opcode == TIMES_EXITCODES) { // x
                 uint64_t id_be, id;
                 read(fd_req, &id_be, 8); 
                 id = be64toh(id_be);
                 
                 printf("[Client] Historique demandé pour ID %llu\n", (unsigned long long)id);
-                handle_history(rep, chemin_tasks, id);
+                traiter_xoe(rep, chemin_tasks, id, "times-exitcodes");
             }
 
-            else if (opcode == 0x534F) { // o 
+            else if (opcode == STDOUT) { // o 
                 uint64_t id_be, id;
                 read(fd_req, &id_be, 8);
                 id = be64toh(id_be);
 
                 printf("[Client] Stdout demandé pour ID %llu\n", (unsigned long long)id);
-                handle_output(rep, chemin_tasks, id, "stdout");
+                traiter_xoe(rep, chemin_tasks, id, "stdout");
             }
 
-            else if (opcode == 0x5345) { // e
+            else if (opcode == STDERR) { // e
                 uint64_t id_be, id;
                 read(fd_req, &id_be, 8);
                 id = be64toh(id_be);
 
                 printf("[Client] Stderr demandé pour ID %llu\n", (unsigned long long)id);
-                handle_output(rep, chemin_tasks, id, "stderr");
+                traiter_xoe(rep, chemin_tasks, id, "stderr");
             }
         }
         
