@@ -12,7 +12,7 @@ char req [256] ; char rep [256] ;
 
 volatile sig_atomic_t running = 1; 
 
-void handler_arret(int sig) {
+void gestion_arret(int sig) {
     (void)sig; 
     running = 0; 
 }
@@ -144,7 +144,7 @@ if (mkfifo (req , 0622) == -1) {
     sigaction(SIGALRM, &sa_alarm, NULL);
 
     struct sigaction sa_arret;
-    sa_arret.sa_handler = handler_arret;
+    sa_arret.sa_handler = gestion_arret;
     sigemptyset(&sa_arret.sa_mask);
     sa_arret.sa_flags = 0; 
     sigaction(SIGINT, &sa_arret, NULL); 
@@ -173,7 +173,6 @@ if (mkfifo (req , 0622) == -1) {
         alarm(0);
 
         if (n == -1 && errno == EINTR) {
-            if (running == 0) break;
             printf("[Timer] Nouvelle minute\n");
             now = time(NULL);
             localtime_r(&now, &tm_now);

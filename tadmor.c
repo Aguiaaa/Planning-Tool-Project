@@ -5,27 +5,36 @@
 extern char *optarg;
 
 void print_timing(uint64_t val, int max) {
-    
     if (val == ((1ULL << max) - 1)) { 
         printf("*"); 
         return; 
     }
-
     int first = 1;
-    for (int i = 0; i < max; i++) {
-        if ((val >> i) & 1) { 
-            if (!first) printf(",");
-            printf("%d", i);
-            first = 0;
+    int start = -1;
+    for (int i = 0; i <= max; i++) {
+        int is_set = (i < max) && ((val >> i) & 1);
+        if (is_set) {
+            if (start == -1) start = i; 
+        } else {
+            if (start != -1) {
+                if (!first) printf(",");
+                if (start == i - 1) {
+                    printf("%d", start); 
+                } else {
+                    printf("%d-%d", start, i - 1);
+                }
+                first = 0;
+                start = -1;
+            }
         }
     }
-    if (first) printf("-"); 
+    if (first) printf("-");
 }
 
-void print_cmd(int fd) {
+void print_cmd_recursive(int fd, int is_root) {
     uint16_t type = read_u16(fd);
 
-    if (type == 0x5349) { 
+    if (type == TYPE_SIMPLE) { 
         uint32_t argc = read_u32(fd);
         for (uint32_t i = 0; i < argc; i++) {
             uint32_t len = read_u32(fd);
@@ -36,15 +45,21 @@ void print_cmd(int fd) {
             if (i < argc - 1) printf(" ");
         }
     } 
-    else if (type == 0x5351) {
+    else if (type == TYPE_SEQ) {
         uint32_t ncmds = read_u32(fd);
-        printf("(");
+        
+        if (!is_root) printf("( ");
+        
         for (uint32_t i = 0; i < ncmds; i++) {
-            print_cmd(fd);
-            if (i < ncmds - 1) printf("; ");
-        }
-        printf(")");
+            print_cmd_recursive(fd, 0); 
+            if (i < ncmds - 1) printf(" ; ");
+        }  
+        if (!is_root) printf(" )");
     }
+}
+
+void print_cmd(int fd) {
+    print_cmd_recursive(fd, 1);
 }
 
 int main(int argc, char *argv[]) {
@@ -142,9 +157,11 @@ int main(int argc, char *argv[]) {
                     }
                 } else {
                     fprintf(stderr, "Erreur : La tache n'existe pas ou n'a pas d'historique.\n");
+                    exit(1) ; 
                 }
 
                 close(fd_rep);
+
                 break;
             }
 
@@ -189,6 +206,7 @@ int main(int argc, char *argv[]) {
                     }
                 } else {
                     fprintf(stderr, "Erreur : Tache inconnue ou fichier vide.\n");
+                    exit(1) ;
                 }
 
                 close(fd_rep);
@@ -236,6 +254,7 @@ int main(int argc, char *argv[]) {
                     }
                 } else {
                     fprintf(stderr, "Erreur : Tache inconnue ou fichier vide.\n");
+                    exit(1) ;
                 }
 
                 close(fd_rep);
