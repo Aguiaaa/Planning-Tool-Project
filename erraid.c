@@ -6,7 +6,7 @@
 #include "protocole.h"
 
 
-
+volatile sig_atomic_t running = 1;
 extern char *optarg;
 extern int optind;
 char req [256] ; char rep [256] ; 
@@ -102,6 +102,11 @@ void handler_alarm(int sig) {
     (void)sig; 
 }
 
+void handler_arret(int sig) {
+    (void)sig;
+    running = 0; 
+}
+
 int main (int argc, char *argv[]) {
     char chemin_tasks [256] , chemin_pipes[256]; 
     char * user = getenv("USER") ;  
@@ -179,13 +184,19 @@ if (mkfifo (req , 0622) == -1) {
     sa_alarm.sa_flags = 0; 
     sigaction(SIGALRM, &sa_alarm, NULL);
 
+    struct sigaction sa_int;
+    sa_int.sa_handler = handler_arret;
+    sigemptyset(&sa_int.sa_mask);
+    sa_int.sa_flags = 0; 
+    sigaction(SIGINT, &sa_int, NULL);
+
 
     int fd_req = open(req, O_RDWR); 
     if (fd_req == -1) { perror("open req"); return 1; }
 
     printf("Démon prêt.\n");
 
-    while (1) {
+    while (running) {
         
         time_t now = time(NULL);
         struct tm tm_now;
@@ -217,14 +228,13 @@ if (mkfifo (req , 0622) == -1) {
             }
         }
         
-        else if (n == 2 && opcode == 0x4C53) {
+        else if (n == 2 ) {
 
-
-            printf("[Client] Reçu LS\n");
-            handle_ls(rep, T, nbtasks);
-
-        }
-        else if (opcode == 0x5458) { // x
+            if ( opcode == 0x4C53) {
+                printf("[Client] Reçu LS\n");
+                handle_ls(rep, T, nbtasks);
+            }
+            else if (opcode == 0x5458) { // x
                 uint64_t id_be, id;
                 read(fd_req, &id_be, 8); 
                 id = be64toh(id_be);
@@ -251,9 +261,12 @@ if (mkfifo (req , 0622) == -1) {
                 handle_output(rep, chemin_tasks, id, "stderr");
             }
         }
+        
+        }
 
     close(fd_req);
-
+    unlink(req); 
+    unlink(rep);
     free(T);
 
   

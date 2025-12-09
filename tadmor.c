@@ -50,9 +50,10 @@ void print_cmd(int fd) {
 int main(int argc, char *argv[]) {
     
     char chemin_pipes[256] , req[256], rep[256];
-    
-    
-   int opt, fd_req , fd_rep ; 
+    char * user = getenv("USER") ;  
+    snprintf (chemin_tasks , sizeof chemin_tasks, "/tmp/%s/erraid/tasks", user) ; 
+    snprintf(chemin_pipes, sizeof chemin_pipes, "/tmp/%s/erraid/pipes", user);
+    int opt, fd_req , fd_rep ; 
     while ((opt = getopt(argc, argv, "lp:x:o:e:")) != -1) {
         switch (opt) {
             case 'p':
