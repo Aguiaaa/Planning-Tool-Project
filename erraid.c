@@ -9,6 +9,14 @@ extern char *optarg;
 extern int optind;
 char req [256] ; char rep [256] ; 
 
+
+volatile sig_atomic_t running = 1; 
+
+void handler_arret(int sig) {
+    (void)sig; 
+    running = 0; 
+}
+
 void write_cmd_recursive(int fd, command *cmd) {
     write_u16(fd, cmd->type);
     if (cmd->type == TYPE_SIMPLE) {
@@ -135,13 +143,21 @@ if (mkfifo (req , 0622) == -1) {
     sa_alarm.sa_flags = 0; 
     sigaction(SIGALRM, &sa_alarm, NULL);
 
+    struct sigaction sa_arret;
+    sa_arret.sa_handler = handler_arret;
+    sigemptyset(&sa_arret.sa_mask);
+    sa_arret.sa_flags = 0; 
+    sigaction(SIGINT, &sa_arret, NULL); 
+    sigaction(SIGTERM, &sa_arret, NULL); 
+
+   
 
     int fd_req = open(req, O_RDWR); 
     if (fd_req == -1) { perror("open req"); return 1; }
 
     printf("Démon prêt.\n");
 
-    while (1) {
+    while (running) {
         
         time_t now = time(NULL);
         struct tm tm_now;
@@ -157,6 +173,7 @@ if (mkfifo (req , 0622) == -1) {
         alarm(0);
 
         if (n == -1 && errno == EINTR) {
+            if (running == 0) break;
             printf("[Timer] Nouvelle minute\n");
             now = time(NULL);
             localtime_r(&now, &tm_now);
