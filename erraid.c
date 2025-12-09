@@ -27,13 +27,12 @@ void write_cmd_recursive(int fd, command *cmd) {
     }
 }
 
-// --- Gère la demande d'historique (-x) ---
 void handle_history(char *rep_path, char *base_path, uint64_t id) {
     int fd_rep = open(rep_path, O_WRONLY);
     if (fd_rep == -1) return;
 
     char hist_file[512];
-    snprintf(hist_file, sizeof(hist_file), "%s/%llu.hist", base_path, (unsigned long long)id);
+    snprintf(hist_file, sizeof(hist_file), "%s/%llu/times-exitcodes", base_path, (unsigned long long)id) ; 
 
     int fd_hist = open(hist_file, O_RDONLY);
     if (fd_hist == -1) {
@@ -61,7 +60,7 @@ void handle_output(char *rep_path, char *base_path, uint64_t id, char *suffixe) 
     if (fd_rep == -1) return;
 
     char out_file[512];
-    snprintf(out_file, sizeof(out_file), "%s/%llu%s", base_path, (unsigned long long)id, suffixe);
+    snprintf(out_file, sizeof(out_file), "%s/%llu/%s", base_path, (unsigned long long)id, suffixe);
 
     int fd_file = open(out_file, O_RDONLY);
     if (fd_file == -1) {
@@ -87,7 +86,7 @@ void handle_ls(char *rep_path, tasks *T, uint64_t nbtasks) {
     int fd_rep = open(rep_path, O_WRONLY);
     if (fd_rep == -1) return;
 
-    write_u16(fd_rep, 0x4F4B); // OK
+    write_u16(fd_rep, 0x4F4B); 
     write_u32(fd_rep, (uint32_t)nbtasks);
 
     for (uint64_t i = 0; i < nbtasks; i++) {
@@ -104,7 +103,7 @@ void handler_alarm(int sig) {
 }
 
 int main (int argc, char *argv[]) {
-    char chemin_tasks [256] , chemin_pipes[256]; bool pipes_dir_defined = false ;
+    char chemin_tasks [256] , chemin_pipes[256]; 
     char * user = getenv("USER") ;  
     snprintf (chemin_tasks , sizeof chemin_tasks, "/tmp/%s/erraid/tasks", user) ; 
     snprintf(chemin_pipes, sizeof chemin_pipes, "/tmp/%s/erraid/pipes", user);
@@ -131,11 +130,9 @@ int main (int argc, char *argv[]) {
                 snprintf (chemin_tasks , sizeof chemin_tasks, "%s/tasks", optarg) ;  
                 break;
             case 'p':
-                snprintf(chemin_pipes, sizeof chemin_pipes, "%s/pipes", optarg);  
+                snprintf(chemin_pipes, sizeof(chemin_pipes), "%s", optarg); 
                 snprintf(req , sizeof req , "%s/erraid-request-pipe", chemin_pipes) ; 
                 snprintf(rep , sizeof rep , "%s/erraid-reply-pipe", chemin_pipes) ;
-                
-                pipes_dir_defined = true ; 
                 break;
             case '?': 
                 fprintf(stderr, "Usage: %s [-r RUN_DIRECTORY] [-p PIPES_DIR]\n", argv[0]);
@@ -150,14 +147,12 @@ int main (int argc, char *argv[]) {
 if (mkfifo (req , 0622) == -1) {
             if (errno != EEXIST) { 
                 perror("mkfifo requete");
-                pipes_dir_defined = true ; 
                 exit(EXIT_FAILURE);
             } 
         }
         if (mkfifo (rep , 0622) == -1) {
             if (errno != EEXIST) { 
                 perror("mkfifo reponse");
-                pipes_dir_defined = true ; 
                 exit(EXIT_FAILURE);
             } 
         }
@@ -199,9 +194,10 @@ if (mkfifo (req , 0622) == -1) {
         
         alarm(seconds_to_sleep); 
 
-
         uint16_t opcode_be;
         ssize_t n = read(fd_req, &opcode_be, 2);
+        uint16_t opcode = be16toh(opcode_be);
+
 
 
         alarm(0);
@@ -220,12 +216,13 @@ if (mkfifo (req , 0622) == -1) {
                 }
             }
         }
-        else if (n == 2) {
-            uint16_t opcode = be16toh(opcode_be);
-            if (opcode == 0x4C53) { // LS
-                printf("[Client] Reçu LS\n");
-                handle_ls(rep, T, nbtasks);
-            }
+        
+        else if (n == 2 && opcode == 0x4C53) {
+
+
+            printf("[Client] Reçu LS\n");
+            handle_ls(rep, T, nbtasks);
+
         }
         else if (opcode == 0x5458) { // x
                 uint64_t id_be, id;
@@ -242,7 +239,7 @@ if (mkfifo (req , 0622) == -1) {
                 id = be64toh(id_be);
 
                 printf("[Client] Stdout demandé pour ID %llu\n", (unsigned long long)id);
-                handle_output(rep, chemin_tasks, id, ".out");
+                handle_output(rep, chemin_tasks, id, "stdout");
             }
 
             else if (opcode == 0x5345) { // e
@@ -251,10 +248,9 @@ if (mkfifo (req , 0622) == -1) {
                 id = be64toh(id_be);
 
                 printf("[Client] Stderr demandé pour ID %llu\n", (unsigned long long)id);
-                handle_output(rep, chemin_tasks, id, ".err");
+                handle_output(rep, chemin_tasks, id, "stderr");
             }
         }
-    }
 
     close(fd_req);
 

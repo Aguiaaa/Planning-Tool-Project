@@ -56,7 +56,7 @@ int main(int argc, char *argv[]) {
     while ((opt = getopt(argc, argv, "lp:x:o:e:")) != -1) {
         switch (opt) {
             case 'p':
-                snprintf(chemin_pipes, sizeof(chemin_pipes), "%s/pipes", optarg);
+                snprintf(chemin_pipes, sizeof(chemin_pipes), "%s", optarg);
                 snprintf(req, sizeof(req), "%s/erraid-request-pipe", chemin_pipes);
                 snprintf(rep, sizeof(rep), "%s/erraid-reply-pipe", chemin_pipes);
                 break;
@@ -243,7 +243,7 @@ int main(int argc, char *argv[]) {
             }
 
             case '?':
-                fprintf(stderr, "Usage: %s [-l ] [-x id] [-o id] [-e id]\n", argv[0]);
+                fprintf(stderr, "Usage: %s [-p PIPES_DIR] [-l ] [-x id] [-o id] [-e id]\n", argv[0]);
                 exit(EXIT_FAILURE);
         }
     }
