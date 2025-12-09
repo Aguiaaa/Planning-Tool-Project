@@ -1,4 +1,4 @@
-# Projet systèmes d'exploitation — 2025  
+# Projet outil de planification - 2025 
 ## erraid & tadmor — Jalon 2
 
 Ce projet implémente un système de planification de tâches inspiré de `cron`, composé :
