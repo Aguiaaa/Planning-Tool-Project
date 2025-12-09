@@ -5,8 +5,6 @@
 #include "parsing_tasks.h"
 #include "protocole.h"
 
-
-volatile sig_atomic_t running = 1;
 extern char *optarg;
 extern int optind;
 char req [256] ; char rep [256] ; 
@@ -184,19 +182,13 @@ if (mkfifo (req , 0622) == -1) {
     sa_alarm.sa_flags = 0; 
     sigaction(SIGALRM, &sa_alarm, NULL);
 
-    struct sigaction sa_int;
-    sa_int.sa_handler = handler_arret;
-    sigemptyset(&sa_int.sa_mask);
-    sa_int.sa_flags = 0; 
-    sigaction(SIGINT, &sa_int, NULL);
-
 
     int fd_req = open(req, O_RDWR); 
     if (fd_req == -1) { perror("open req"); return 1; }
 
     printf("Démon prêt.\n");
 
-    while (running) {
+    while (1) {
         
         time_t now = time(NULL);
         struct tm tm_now;
