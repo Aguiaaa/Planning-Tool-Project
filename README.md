@@ -37,9 +37,13 @@ Utilisation avec le répertoire par défaut :
 ./erraid
 ```
 
-Spécifier un répertoire de stockage (contenant `tasks/` et `pipes/`) :
+Spécifier un répertoire de stockage (contenant `tasks/`) :
 ```
 ./erraid -r <chemin>
+```
+Spécifier le répertoire contenant les tubes de communication (par defaut `/tmp/$USER/erraid/pipes`) :
+```
+./erraid -p <chemin>
 ```
 
 À son démarrage, `erraid` crée les pipes nommés nécessaires :  
