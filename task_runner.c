@@ -45,6 +45,9 @@ int run(tasks *T, command *cmd) {
             int fe = open(err, O_WRONLY | O_CREAT | O_APPEND, 0644);
             dup2(fo, 1);
             dup2(fe, 2); 
+            close(fo) ; 
+            close(fe) ; 
+
             char *args[cmd->args.ARGC + 1];
             for (uint32_t i = 0; i < cmd->args.ARGC; i++) {
                 args[i] = (char *)cmd->args.ARGV[i].DATA;

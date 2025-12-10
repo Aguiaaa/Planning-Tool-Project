@@ -4,6 +4,8 @@
 #include "task_runner.h"
 #include "parsing_tasks.h"
 #include "protocole.h"
+#include <poll.h> 
+
 
 extern char *optarg;
 extern int optind;
@@ -12,7 +14,7 @@ char req [256] ; char rep [256] ;
 
 volatile sig_atomic_t running = 1; 
 
-void gestion_arret(int sig) {
+void handler_arret(int sig) {
     (void)sig; 
     running = 0; 
 }
@@ -39,14 +41,14 @@ void traiter_xoe(char *rep_path, char *base_path, uint64_t id, char *filename) {
 
     char file_path[512];
     snprintf(file_path, sizeof(file_path), "%s/%llu/%s", base_path, (unsigned long long)id, filename);
-
+    
     int fd_file = open(file_path, O_RDONLY);
     if (fd_file == -1) {
         write_u16(fd_rep, REP_ERR); 
     } else {
         write_u16(fd_rep, REP_OK); 
         struct stat st;
-        fstat(fd_file, &st);
+        fstat(fd_file, &st) ;
         if (strcmp(filename, "times-exitcodes") == 0) {
              write_u32(fd_rep, (uint32_t)(st.st_size / 10));
         } else {
@@ -78,7 +80,7 @@ void lister_taches(char *rep_path, tasks *T, uint64_t nbtasks) {
     }
     close(fd_rep);
 }
-void gestion_alarme(int sig) {
+void handler_alarme(int sig) {
     (void)sig; 
 }
 
@@ -135,18 +137,17 @@ if (mkfifo (req , 0622) == -1) {
     sigemptyset(&sa_ign.sa_mask);
     sa_ign.sa_flags = 0;
     sigaction(SIGPIPE, &sa_ign, NULL);
-
     struct sigaction sa_alarm;
-    sa_alarm.sa_handler = gestion_alarme;
+    sa_alarm.sa_handler = handler_alarme;
     sigemptyset(&sa_alarm.sa_mask);
 
     sa_alarm.sa_flags = 0; 
     sigaction(SIGALRM, &sa_alarm, NULL);
 
     struct sigaction sa_arret;
-    sa_arret.sa_handler = gestion_arret;
+    sa_arret.sa_handler = handler_arret;
     sigemptyset(&sa_arret.sa_mask);
-    sa_arret.sa_flags = 0; 
+    sa_arret.sa_flags = SA_RESTART; 
     sigaction(SIGINT, &sa_arret, NULL); 
     sigaction(SIGTERM, &sa_arret, NULL); 
 
@@ -157,39 +158,67 @@ if (mkfifo (req , 0622) == -1) {
 
     printf("Démon prêt.\n");
 
+    struct pollfd fds[1] ; 
+    fds[0].fd = fd_req ; 
+    fds[0].events = POLLIN ; 
+
+    time_t last_check = time(NULL) ; 
+    struct tm tm_last ; 
+    localtime_r(&last_check , &tm_last) ;
+    int last_minute = tm_last.tm_min ;
+
     while (running) {
         
         time_t now = time(NULL);
         struct tm tm_now;
         localtime_r(&now, &tm_now);
-        int sleep = 60 - tm_now.tm_sec;
         
-        alarm(sleep); 
+        int timeout_ms ; 
+        if  (tm_now.tm_min != last_minute) {
+            timeout_ms = 0 ;
+        } else {
+            int seconds_left = 60 - tm_now.tm_sec ; 
+            timeout_ms = seconds_left * 1000;
+        }
 
-        uint16_t opcode_be;
-        ssize_t n = read(fd_req, &opcode_be, 2);
-        uint16_t opcode = be16toh(opcode_be);
+        int ret = poll(fds , 1 , timeout_ms) ; 
+        if (ret == -1) {
+            if (errno == EINTR) continue ; 
+            perror("poll") ; 
+            break ; 
+        }
 
-        alarm(0);
-
-        if (n == -1 && errno == EINTR) {
+        now = time(NULL);
+        localtime_r(&now, &tm_now);
+        if (tm_now.tm_min != last_minute) {
             printf("[Timer] Nouvelle minute\n");
-            now = time(NULL);
-            localtime_r(&now, &tm_now);
             for (uint64_t i = 0; i < nbtasks; i++) {
                 if (should_run(&T[i], &tm_now)) {
-                    if (fork() == 0) {
+                    pid_t pid = fork() ; 
+                    if (pid == -1) {
+                        perror("fork") ;
+                        continue ; 
+                    }
+                    if (pid == 0) {
                         close(fd_req);
                         if (fork() == 0) { execute_task(&T[i]); exit(0); }
                         exit(0);
                     }
-                    wait(NULL);
+                    int status ;
+                    if (waitpid(pid, &status , 0) == -1) {
+                        perror("waitpid") ;
+                    }
                 }
             }
+            last_minute = tm_now.tm_min ; 
         }
         
-        else if (n == 2 ) {
+        if (ret > 0 && (fds[0].revents & POLLIN) ) {
+            uint16_t opcode_be;
+            ssize_t n = read(fd_req, &opcode_be, 2);
 
+            if (n != 2) continue ; 
+            uint16_t opcode = be16toh(opcode_be);
             if ( opcode == LIST) { // l 
                 printf("[Client] Reçu LS\n");
                 lister_taches(rep, T, nbtasks);
