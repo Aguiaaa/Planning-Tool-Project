@@ -60,7 +60,7 @@ void read_cmd (command * c , char * chemin, char * chemin_cmd) {
 
         }
         else {
-            struct dirent *entry; /* Locale pour la récursivité */
+            struct dirent *entry; 
             struct stat st;
             uint64_t number_of_cmd = 0 ; 
             DIR * d_cmd = opendir(chemin_cmd) ; 
