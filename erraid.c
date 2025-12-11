@@ -110,7 +110,18 @@ int main (int argc, char *argv[]) {
     printf("Chemin tasks = %s\n", chemin_tasks);
     printf("Chemin pipes = %s\n", chemin_pipes);
 
-if (mkfifo (req , 0622) == -1) {
+    struct stat st;
+    if (stat(chemin_pipes, &st) == -1) {
+        if (mkdir(chemin_pipes, 0700) == -1) {
+            perror("mkdir chemin_pipes");
+            exit(1);
+        }
+    } else if (!S_ISDIR(st.st_mode)) {
+        fprintf(stderr, "%s n'est pas un répertoire\n", chemin_pipes);
+        exit(1);
+    }
+
+    if (mkfifo (req , 0622) == -1) {
             if (errno != EEXIST) { 
                 perror("mkfifo requete");
                 exit(EXIT_FAILURE);
