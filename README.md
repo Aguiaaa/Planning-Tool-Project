@@ -117,7 +117,4 @@ tadmor -p /tmp/$USER/erraid/pipes -l
 
 ---
 
-## Notes
-
-- Les fonctionnalités de création/suppression de tâches (`-c`, `-s`, `-r`, etc.) seront implémentées au **rendu final**.  
 
