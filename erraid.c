@@ -36,36 +36,62 @@ void write_cmd_recursive(int fd, command *cmd) {
 }
 
 void traiter_xoe(char *rep_path, char *base_path, uint64_t id, char *filename) {
-    int fd_rep = open(rep_path, O_WRONLY);
+    int fd_rep = open(rep_path, O_RDWR);
     if (fd_rep == -1) return;
 
+    char dir_path[512];
+    snprintf(dir_path, sizeof(dir_path), "%s/%llu",
+             base_path, (unsigned long long)id);
+
+    struct stat st_task;
+    if (stat(dir_path, &st_task) == -1) {
+        int err = errno;
+        write_u16(fd_rep, 0x4552);       
+
+        if (err == ENOENT) {
+            write_u16(fd_rep, 0x4E46);   
+        } else {
+            write_u16(fd_rep, 0x4E52);  
+        }
+        close(fd_rep);
+        return;
+    }
+
     char file_path[512];
-    snprintf(file_path, sizeof(file_path), "%s/%llu/%s", base_path, (unsigned long long)id, filename);
-    
+    snprintf(file_path, sizeof(file_path), "%s/%llu/%s",
+             base_path, (unsigned long long)id, filename);
+
     int fd_file = open(file_path, O_RDONLY);
     if (fd_file == -1) {
-        write_u16(fd_rep, REP_ERR); 
-    } else {
-        write_u16(fd_rep, REP_OK); 
-        struct stat st;
-        fstat(fd_file, &st) ;
-        if (strcmp(filename, "times-exitcodes") == 0) {
-             write_u32(fd_rep, (uint32_t)(st.st_size / 10));
-        } else {
-             write_u32(fd_rep, (uint32_t)st.st_size);
-        }
-        char buf[1024];
-        ssize_t n;
-        while ((n = read(fd_file, buf, sizeof(buf))) > 0) {
-            write(fd_rep, buf, n);
-        }
-        close(fd_file);
+        write_u16(fd_rep, 0x4552);        
+        write_u16(fd_rep, 0x4E52);       
+        close(fd_rep);
+        return;
     }
+    write_u16(fd_rep, REP_OK);
+
+    struct stat st;
+    fstat(fd_file, &st);
+
+    if (strcmp(filename, "times-exitcodes") == 0) {
+        write_u32(fd_rep, (uint32_t)(st.st_size / 10));
+    } else {
+        write_u32(fd_rep, (uint32_t)st.st_size);
+    }
+
+    char buf[1024];
+    ssize_t n;
+    while ((n = read(fd_file, buf, sizeof(buf))) > 0) {
+        write(fd_rep, buf, n);
+    }
+
+    close(fd_file);
     close(fd_rep);
 }
 
+
 void lister_taches(char *rep_path, tasks *T, uint64_t nbtasks) {
-    int fd_rep = open(rep_path, O_WRONLY);
+    int fd_rep = open(rep_path, O_RDWR);
     if (fd_rep == -1) return;
 
     write_u16(fd_rep, 0x4F4B); 
@@ -86,40 +112,43 @@ void handler_alarme(int sig) {
 
 int main (int argc, char *argv[]) {
     char chemin_tasks [256] , chemin_pipes[256]; 
-    char * user = getenv("USER") ;  
-    snprintf (chemin_tasks , sizeof chemin_tasks, "/tmp/%s/erraid/tasks", user) ; 
-    snprintf(chemin_pipes, sizeof chemin_pipes, "/tmp/%s/erraid/pipes", user);
+    char * user = getenv("USER") ;
 
+    char *arg_r = NULL;
+    char *arg_p = NULL;
     int opt;  
     while ((opt = getopt(argc, argv, "r:p:")) != -1) {
         switch (opt) {
-            case 'r':
-                snprintf (chemin_tasks , sizeof chemin_tasks, "%s/tasks", optarg) ;  
-                break;
-            case 'p':
-                snprintf(chemin_pipes, sizeof(chemin_pipes), "%s", optarg); 
-                snprintf(req , sizeof req , "%s/erraid-request-pipe", chemin_pipes) ; 
-                snprintf(rep , sizeof rep , "%s/erraid-reply-pipe", chemin_pipes) ;
-                break;
+            case 'r': arg_r = optarg; break;
+            case 'p': arg_p = optarg; break;
             case '?': 
                 fprintf(stderr, "Usage: %s [-r RUN_DIRECTORY] [-p PIPES_DIR]\n", argv[0]);
                 exit(EXIT_FAILURE);
         }
     }
 
+    if (arg_r) snprintf(chemin_tasks, sizeof(chemin_tasks), "%s/tasks", arg_r);
+    else if (user) snprintf(chemin_tasks, sizeof(chemin_tasks), "/tmp/%s/erraid/tasks", user);
+    else strcpy(chemin_tasks, "/tmp/erraid/tasks");
+
+    if (arg_p) snprintf(chemin_pipes, sizeof(chemin_pipes), "%s", arg_p);
+    else if (arg_r) snprintf(chemin_pipes, sizeof(chemin_pipes), "%s/pipes", arg_r);
+    else if (user) snprintf(chemin_pipes, sizeof(chemin_pipes), "/tmp/%s/erraid/pipes", user);
+    else strcpy(chemin_pipes, "/tmp/erraid/pipes");
+
     printf("Chemin tasks = %s\n", chemin_tasks);
     printf("Chemin pipes = %s\n", chemin_pipes);
 
-    struct stat st;
-    if (stat(chemin_pipes, &st) == -1) {
-        if (mkdir(chemin_pipes, 0700) == -1) {
-            perror("mkdir chemin_pipes");
-            exit(1);
-        }
-    } else if (!S_ISDIR(st.st_mode)) {
-        fprintf(stderr, "%s n'est pas un répertoire\n", chemin_pipes);
-        exit(1);
+    snprintf(req , sizeof req , "%s/erraid-request-pipe", chemin_pipes) ; 
+    snprintf(rep , sizeof rep , "%s/erraid-reply-pipe", chemin_pipes) ;
+
+   if (!arg_p && !arg_r && user) {
+        char parent[256];
+        snprintf(parent, sizeof(parent), "/tmp/%s/erraid", user);
+        mkdir(parent, 0700); 
     }
+    struct stat st;
+    if (stat(chemin_pipes, &st) == -1) mkdir(chemin_pipes, 0700);
 
     if (mkfifo (req , 0622) == -1) {
             if (errno != EEXIST) { 
@@ -133,41 +162,38 @@ int main (int argc, char *argv[]) {
                 exit(EXIT_FAILURE);
             } 
         }
-    uint64_t nbtasks = number_of_tasks(chemin_tasks);
-    printf("Nombre de tâches trouvées : %llu\n",
-           (unsigned long long)nbtasks);
-
-    tasks *T = read_tasks(chemin_tasks);
-    if (!T) {
-        write(2, "Erreur dans read_tasks\n", 24);
-        return 1;
-    }
-
+        
     struct sigaction sa_ign;
     sa_ign.sa_handler = SIG_IGN;
     sigemptyset(&sa_ign.sa_mask);
     sa_ign.sa_flags = 0;
     sigaction(SIGPIPE, &sa_ign, NULL);
-    struct sigaction sa_alarm;
-    sa_alarm.sa_handler = handler_alarme;
-    sigemptyset(&sa_alarm.sa_mask);
 
-    sa_alarm.sa_flags = 0; 
-    sigaction(SIGALRM, &sa_alarm, NULL);
 
     struct sigaction sa_arret;
     sa_arret.sa_handler = handler_arret;
     sigemptyset(&sa_arret.sa_mask);
-    sa_arret.sa_flags = SA_RESTART; 
+    sa_arret.sa_flags = 0; 
     sigaction(SIGINT, &sa_arret, NULL); 
-    sigaction(SIGTERM, &sa_arret, NULL); 
-
-   
-
+    sigaction(SIGTERM, &sa_arret, NULL);
+    
     int fd_req = open(req, O_RDWR); 
-    if (fd_req == -1) { perror("open req"); return 1; }
+    if (fd_req == -1) { perror("open req"); unlink(req); unlink(rep); return 1; }
+
+    uint64_t nbtasks = number_of_tasks(chemin_tasks);
+    printf("Nombre de tâches trouvées : %llu\n",
+           (unsigned long long)nbtasks);
+
+    tasks *T = read_tasks(chemin_tasks);
+
+    if (!T && nbtasks > 0) {
+        write(2, "Erreur lecture tasks\n", 21);
+        close(fd_req); unlink(req); unlink(rep);
+        return 1;
+    }
 
     printf("Démon prêt.\n");
+    fflush(stdout);
 
     struct pollfd fds[1] ; 
     fds[0].fd = fd_req ; 
