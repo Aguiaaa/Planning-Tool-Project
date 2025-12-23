@@ -116,15 +116,41 @@ int main (int argc, char *argv[]) {
 
     char *arg_r = NULL;
     char *arg_p = NULL;
+    int avantPlan = 0 ;
     int opt;  
-    while ((opt = getopt(argc, argv, "r:p:")) != -1) {
+    while ((opt = getopt(argc, argv, "R:P:F")) != -1) {
         switch (opt) {
-            case 'r': arg_r = optarg; break;
-            case 'p': arg_p = optarg; break;
+            case 'R': arg_r = optarg; break;
+            case 'P': arg_p = optarg; break;
+            case 'F': avantPlan = 1 ; break ; 
             case '?': 
                 fprintf(stderr, "Usage: %s [-r RUN_DIRECTORY] [-p PIPES_DIR]\n", argv[0]);
                 exit(EXIT_FAILURE);
         }
+    }
+    if (!avantPlan) {
+        printf("Détachement du terminal... (mode démon)\n");
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        exit(1);
+    }
+    if (pid > 0) {
+        // C'est le processus PARENT. 
+        // Il doit mourir pour rendre la main au shell.
+        exit(0); 
+    }
+
+    // Ici, nous sommes dans le FILS (le futur démon)
+    setsid(); // Création d'une nouvelle session [cite: 279]
+    
+    // Optionnel : deuxième fork pour garantir qu'on ne peut pas réacquérir de terminal
+    if (fork() > 0) exit(0); 
+
+    // Fermeture des flux pour ne plus écrire dans le terminal du shell
+    close(STDIN_FILENO);
+    close(STDOUT_FILENO);
+    close(STDERR_FILENO);
     }
 
     if (arg_r) snprintf(chemin_tasks, sizeof(chemin_tasks), "%s/tasks", arg_r);
@@ -285,6 +311,15 @@ int main (int argc, char *argv[]) {
 
                 printf("[Client] Stderr demandé pour ID %llu\n", (unsigned long long)id);
                 traiter_xoe(rep, chemin_tasks, id, "stderr");
+            }
+            else if (opcode == TERM) { // 0x4b49 ('TM')
+                printf("[Client] Requête de terminaison reçue.\n");
+                int fd_rep = open(rep, O_RDWR);
+                if (fd_rep == -1) perror("fd_rep") ; break ;
+                // Envoyer la réponse OK au client avant de fermer
+                write_u16(fd_rep, REP_OK); 
+                close(fd_rep) ; 
+                running = 0; // Sort de la boucle principale pour terminer proprement
             }
         }
         

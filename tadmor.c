@@ -68,9 +68,9 @@ int main(int argc, char *argv[]) {
     char * user = getenv("USER") ;  
     snprintf(chemin_pipes, sizeof chemin_pipes, "/tmp/%s/erraid/pipes", user);
     int opt, fd_req , fd_rep ; 
-    while ((opt = getopt(argc, argv, "lp:x:o:e:")) != -1) {
+    while ((opt = getopt(argc, argv, "lP:x:o:e:q")) != -1) {
         switch (opt) {
-            case 'p':
+            case 'P':
                 snprintf(chemin_pipes, sizeof(chemin_pipes), "%s", optarg);
                 snprintf(req, sizeof(req), "%s/erraid-request-pipe", chemin_pipes);
                 snprintf(rep, sizeof(rep), "%s/erraid-reply-pipe", chemin_pipes);
@@ -260,9 +260,25 @@ int main(int argc, char *argv[]) {
                 close(fd_rep);
                 break;
             }
+            case 'q': {
+                fd_req = open(req, O_WRONLY);
+                if (fd_req == -1) { perror("open req"); exit(1); }
+                
+                // Envoyer l'opcode TERMINATE (0x4b49)
+                write_u16(fd_req, 0x4b49); 
+                close(fd_req);
+
+                // Attendre la réponse OK du démon
+                fd_rep = open(rep, O_RDONLY);
+                if (read_u16(fd_rep) == REP_OK) {
+                    printf("Démon arrêté avec succès.\n");
+                }
+                close(fd_rep);
+                break;
+            }
 
             case '?':
-                fprintf(stderr, "Usage: %s [-p PIPES_DIR] [-l ] [-x id] [-o id] [-e id]\n", argv[0]);
+                fprintf(stderr, "Usage: %s [-P PIPES_DIR] [-l ] [-x id] [-o id] [-e id]\n", argv[0]);
                 exit(EXIT_FAILURE);
         }
     }
