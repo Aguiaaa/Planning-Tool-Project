@@ -5,21 +5,21 @@
 extern char *optarg;
 
 void print_timing(uint64_t val, int max) {
-    if (val == ((1ULL << max) - 1)) { 
-        printf("*"); 
-        return; 
+    if (val == ((1ULL << max) - 1)) {
+        printf("*");
+        return;
     }
     int first = 1;
     int start = -1;
     for (int i = 0; i <= max; i++) {
         int is_set = (i < max) && ((val >> i) & 1);
         if (is_set) {
-            if (start == -1) start = i; 
+            if (start == -1) start = i;
         } else {
             if (start != -1) {
                 if (!first) printf(",");
                 if (start == i - 1) {
-                    printf("%d", start); 
+                    printf("%d", start);
                 } else {
                     printf("%d-%d", start, i - 1);
                 }
@@ -34,7 +34,7 @@ void print_timing(uint64_t val, int max) {
 void print_cmd_recursive(int fd, int is_root) {
     uint16_t type = read_u16(fd);
 
-    if (type == TYPE_SIMPLE) { 
+    if (type == TYPE_SIMPLE) {
         uint32_t argc = read_u32(fd);
         for (uint32_t i = 0; i < argc; i++) {
             uint32_t len = read_u32(fd);
@@ -44,17 +44,33 @@ void print_cmd_recursive(int fd, int is_root) {
             printf("%s", buf);
             if (i < argc - 1) printf(" ");
         }
-    } 
-    else if (type == TYPE_SEQ) {
+    } else if (type == TYPE_SEQ || type == TYPE_PL) {
         uint32_t ncmds = read_u32(fd);
-        
-        if (!is_root) printf("( ");
-        
+        char *sep = (type == TYPE_SEQ) ? " ; " : " | ";
+
+        if (!is_root) printf("(");
         for (uint32_t i = 0; i < ncmds; i++) {
-            print_cmd_recursive(fd, 0); 
-            if (i < ncmds - 1) printf(" ; ");
-        }  
-        if (!is_root) printf(" )");
+            print_cmd_recursive(fd, 0);
+            if (i < ncmds - 1) printf("%s", sep);
+        }
+        if (!is_root) printf(")");
+    } else if (type == TYPE_IF) {
+        uint32_t ncmds = read_u32(fd);
+        if (!is_root) printf("(");
+
+        printf("if ");
+        print_cmd_recursive(fd, 0);
+        printf(" ; then ");
+
+        print_cmd_recursive(fd, 0);
+
+        if (ncmds == 3) {
+            printf(" else ");
+            print_cmd_recursive(fd, 0);
+        }
+
+        printf(" fi");
+        if (!is_root) printf(")");
     }
 }
 
@@ -63,224 +79,262 @@ void print_cmd(int fd) {
 }
 
 int main(int argc, char *argv[]) {
-    
-    char chemin_pipes[256] , req[256], rep[256];
-    char * user = getenv("USER") ;  
+    char chemin_pipes[256], req[256], rep[256];
+    char *user = getenv("USER");
     snprintf(chemin_pipes, sizeof chemin_pipes, "/tmp/%s/erraid/pipes", user);
-    int opt, fd_req , fd_rep ; 
-    while ((opt = getopt(argc, argv, "lP:x:o:e:q")) != -1) {
+    int opt, fd_req, fd_rep;
+    while ((opt = getopt(argc, argv, "lP:x:o:e:qr:")) != -1) {
         switch (opt) {
-            case 'P':
-                snprintf(chemin_pipes, sizeof(chemin_pipes), "%s", optarg);
-                snprintf(req, sizeof(req), "%s/erraid-request-pipe", chemin_pipes);
-                snprintf(rep, sizeof(rep), "%s/erraid-reply-pipe", chemin_pipes);
-                break;
+        case 'P':
+            snprintf(chemin_pipes, sizeof(chemin_pipes), "%s", optarg);
+            snprintf(req, sizeof(req), "%s/erraid-request-pipe", chemin_pipes);
+            snprintf(rep, sizeof(rep), "%s/erraid-reply-pipe", chemin_pipes);
+            break;
 
-            case 'l':
-                fd_req = open(req, O_WRONLY);
-                uint16_t opcode = htobe16(0x4C53);
-                if (write(fd_req, &opcode, sizeof(uint16_t)) == -1) {
-                    perror("write req");
-                    exit(1);
-                }
-                close(fd_req);
-                
-                fd_rep = open(rep, O_RDONLY);
-                if (fd_rep == -1) {
-                    perror("open rep");
-                    exit(1);
-                }
+        case 'l':
+            fd_req = open(req, O_WRONLY);
+            uint16_t opcode = htobe16(0x4C53);
+            if (write(fd_req, &opcode, sizeof(uint16_t)) == -1) {
+                perror("write req");
+                exit(1);
+            }
+            close(fd_req);
 
-                uint16_t reponse = read_u16(fd_rep);
-                if (reponse == 0x4F4B) {
-                    uint32_t nbtasks = read_u32(fd_rep);
+            fd_rep = open(rep, O_RDONLY);
+            if (fd_rep == -1) {
+                perror("open rep");
+                exit(1);
+            }
 
-                    for (uint32_t i = 0; i < nbtasks; i++) {
-                        uint64_t id = read_u64(fd_rep);
+            uint16_t reponse = read_u16(fd_rep);
+            if (reponse == 0x4F4B) {
+                uint32_t nbtasks = read_u32(fd_rep);
 
-                        uint64_t min = read_u64(fd_rep);
-                        uint32_t hour = read_u32(fd_rep);
-                        uint8_t day;
-                        read_all(fd_rep, &day, 1);
-                        
-                        printf("%llu: ", (unsigned long long)id);
+                for (uint32_t i = 0; i < nbtasks; i++) {
+                    uint64_t id = read_u64(fd_rep);
+
+                    uint64_t min = read_u64(fd_rep);
+                    uint32_t hour = read_u32(fd_rep);
+                    uint8_t day;
+                    read_all(fd_rep, &day, 1);
+
+                    printf("%llu: ", (unsigned long long)id);
+                    if (min == 0 && hour == 0 && day == 0) {
+                        printf("- - - ");
+                    } else {
                         print_timing(min, 60);
                         printf(" ");
                         print_timing((uint64_t)hour, 24);
                         printf(" ");
                         print_timing((uint64_t)day, 7);
                         printf(" ");
-                        print_cmd(fd_rep);
-                        printf("\n");
                     }
-                } else {
-                    fprintf(stderr, "Erreur du demon: 0x%x\n", reponse);
+
+                    print_cmd(fd_rep);
+                    printf("\n");
                 }
-                close(fd_rep);
-                break;
+            } else {
+                fprintf(stderr, "Erreur du demon: 0x%x\n", reponse);
+            }
+            close(fd_rep);
+            break;
 
-            case 'x': {
-                uint64_t id = strtoull(optarg, NULL, 10);
+        case 'x': {
+            uint64_t id = strtoull(optarg, NULL, 10);
 
-                fd_req = open(req, O_WRONLY);
-                if (fd_req == -1) {
-                    perror("Erreur ouverture pipe requete");
-                    exit(1);
-                }
-
-                write_u16(fd_req, 0x5458);
-                write_u64(fd_req, id);
-                close(fd_req);
-
-                fd_rep = open(rep, O_RDONLY);
-                if (fd_rep == -1) {
-                    perror("Erreur ouverture pipe reponse");
-                    exit(1);
-                }
-
-                uint16_t status = read_u16(fd_rep);
-
-                if (status == 0x4F4B) {
-                    uint32_t nombre_execs = read_u32(fd_rep);
-
-                    for (uint32_t i = 0; i < nombre_execs; i++) {
-                        uint64_t timestamp = read_u64(fd_rep);
-                        uint16_t code_retour = read_u16(fd_rep);
-
-                        time_t t = (time_t)timestamp;
-                        struct tm *info = localtime(&t);
-
-                        char date_lisible[64];
-                        strftime(date_lisible, 64, "%Y-%m-%d %H:%M:%S", info);
-
-                        printf("%s %d\n", date_lisible, code_retour);
-                    }
-                } else {
-                    fprintf(stderr, "Erreur : La tache n'existe pas ou n'a pas d'historique.\n");
-                    exit(1) ; 
-                }
-
-                close(fd_rep);
-
-                break;
+            fd_req = open(req, O_WRONLY);
+            if (fd_req == -1) {
+                perror("Erreur ouverture pipe requete");
+                exit(1);
             }
 
-            case 'o': {
-                uint64_t id = strtoull(optarg, NULL, 10);
+            write_u16(fd_req, 0x5458);
+            write_u64(fd_req, id);
+            close(fd_req);
 
-                fd_req = open(req, O_WRONLY);
-                if (fd_req == -1) {
-                    perror("Erreur ouverture pipe requete");
-                    exit(1);
+            fd_rep = open(rep, O_RDONLY);
+            if (fd_rep == -1) {
+                perror("Erreur ouverture pipe reponse");
+                exit(1);
+            }
+
+            uint16_t status = read_u16(fd_rep);
+
+            if (status == 0x4F4B) {
+                uint32_t nombre_execs = read_u32(fd_rep);
+
+                for (uint32_t i = 0; i < nombre_execs; i++) {
+                    uint64_t timestamp = read_u64(fd_rep);
+                    uint16_t code_retour = read_u16(fd_rep);
+
+                    time_t t = (time_t)timestamp;
+                    struct tm *info = localtime(&t);
+
+                    char date_lisible[64];
+                    strftime(date_lisible, 64, "%Y-%m-%d %H:%M:%S", info);
+
+                    printf("%s %d\n", date_lisible, code_retour);
                 }
+            } else {
+                fprintf(stderr, "Erreur : La tache n'existe pas ou n'a pas d'historique.\n");
+                exit(1);
+            }
 
-                write_u16(fd_req, 0x534F);
-                write_u64(fd_req, id);
-                close(fd_req);
+            close(fd_rep);
 
-                fd_rep = open(rep, O_RDONLY);
-                if (fd_rep == -1) {
-                    perror("Erreur ouverture pipe reponse");
-                    exit(1);
-                }
+            break;
+        }
 
-                uint16_t status = read_u16(fd_rep);
+        case 'o': {
+            uint64_t id = strtoull(optarg, NULL, 10);
 
-                if (status == 0x4F4B) {
-                    uint32_t taille_fichier = read_u32(fd_rep);
+            fd_req = open(req, O_WRONLY);
+            if (fd_req == -1) {
+                perror("Erreur ouverture pipe requete");
+                exit(1);
+            }
 
-                    char buffer[1024];
-                    uint32_t total_lu = 0;
+            write_u16(fd_req, 0x534F);
+            write_u64(fd_req, id);
+            close(fd_req);
 
-                    while (total_lu < taille_fichier) {
-                        int a_lire = 1024;
-                        if (taille_fichier - total_lu < 1024) {
-                            a_lire = taille_fichier - total_lu;
-                        }
+            fd_rep = open(rep, O_RDONLY);
+            if (fd_rep == -1) {
+                perror("Erreur ouverture pipe reponse");
+                exit(1);
+            }
 
-                        int n = read(fd_rep, buffer, a_lire);
-                        if (n <= 0) break;
+            uint16_t status = read_u16(fd_rep);
 
-                        write(1, buffer, n);
-                        total_lu += n;
+            if (status == 0x4F4B) {
+                uint32_t taille_fichier = read_u32(fd_rep);
+
+                char buffer[1024];
+                uint32_t total_lu = 0;
+
+                while (total_lu < taille_fichier) {
+                    int a_lire = 1024;
+                    if (taille_fichier - total_lu < 1024) {
+                        a_lire = taille_fichier - total_lu;
                     }
-                } else {
-                    fprintf(stderr, "Erreur : Tache inconnue ou fichier vide.\n");
-                    exit(1) ;
-                }
 
-                close(fd_rep);
-                break;
+                    int n = read(fd_rep, buffer, a_lire);
+                    if (n <= 0) break;
+
+                    write(1, buffer, n);
+                    total_lu += n;
+                }
+            } else {
+                fprintf(stderr, "Erreur : Tache inconnue ou fichier vide.\n");
+                exit(1);
             }
 
-            case 'e': {
-                uint64_t id = strtoull(optarg, NULL, 10);
+            close(fd_rep);
+            break;
+        }
 
-                fd_req = open(req, O_WRONLY);
-                if (fd_req == -1) {
-                    perror("Erreur ouverture pipe requete");
-                    exit(1);
-                }
+        case 'e': {
+            uint64_t id = strtoull(optarg, NULL, 10);
 
-                write_u16(fd_req, 0x5345);
-                write_u64(fd_req, id);
-                close(fd_req);
+            fd_req = open(req, O_WRONLY);
+            if (fd_req == -1) {
+                perror("Erreur ouverture pipe requete");
+                exit(1);
+            }
 
-                fd_rep = open(rep, O_RDONLY);
-                if (fd_rep == -1) {
-                    perror("Erreur ouverture pipe reponse");
-                    exit(1);
-                }
+            write_u16(fd_req, 0x5345);
+            write_u64(fd_req, id);
+            close(fd_req);
 
-                uint16_t status = read_u16(fd_rep);
+            fd_rep = open(rep, O_RDONLY);
+            if (fd_rep == -1) {
+                perror("Erreur ouverture pipe reponse");
+                exit(1);
+            }
 
-                if (status == 0x4F4B) {
-                    uint32_t taille_fichier = read_u32(fd_rep);
+            uint16_t status = read_u16(fd_rep);
 
-                    char buffer[1024];
-                    uint32_t total_lu = 0;
+            if (status == 0x4F4B) {
+                uint32_t taille_fichier = read_u32(fd_rep);
 
-                    while (total_lu < taille_fichier) {
-                        int a_lire = 1024;
-                        if (taille_fichier - total_lu < 1024) {
-                            a_lire = taille_fichier - total_lu;
-                        }
+                char buffer[1024];
+                uint32_t total_lu = 0;
 
-                        int n = read(fd_rep, buffer, a_lire);
-                        if (n <= 0) break;
-
-                        write(1, buffer, n);
-                        total_lu += n;
+                while (total_lu < taille_fichier) {
+                    int a_lire = 1024;
+                    if (taille_fichier - total_lu < 1024) {
+                        a_lire = taille_fichier - total_lu;
                     }
+
+                    int n = read(fd_rep, buffer, a_lire);
+                    if (n <= 0) break;
+
+                    write(1, buffer, n);
+                    total_lu += n;
+                }
+            } else {
+                fprintf(stderr, "Erreur : Tache inconnue ou fichier vide.\n");
+                exit(1);
+            }
+
+            close(fd_rep);
+            break;
+        }
+        case 'r': {
+            uint64_t id = strtoull(optarg, NULL, 10);
+
+            fd_req = open(req, O_WRONLY);
+            if (fd_req == -1) {
+                perror("Erreur ouverture pipe requete");
+                exit(1);
+            }
+
+            write_u16(fd_req, 0x524D);
+            write_u64(fd_req, id);
+            close(fd_req);
+
+            fd_rep = open(rep, O_RDONLY);
+            if (fd_rep == -1) {
+                perror("Erreur ouverture pipe reponse");
+                exit(1);
+            }
+
+            uint16_t status = read_u16(fd_rep);
+
+            if (status == 0x4F4B) {
+                printf("Tâche %llu supprimée avec succès.\n", (unsigned long long)id);
+            } else {
+                uint16_t err = read_u16(fd_rep);
+                if (err == 0x4E46) {
+                    fprintf(stderr, "Erreur : Tâche %llu introuvable (NF).\n", (unsigned long long)id);
                 } else {
-                    fprintf(stderr, "Erreur : Tache inconnue ou fichier vide.\n");
-                    exit(1) ;
+                    fprintf(stderr, "Erreur : Code 0x%x\n", err);
                 }
-
-                close(fd_rep);
-                break;
             }
-            case 'q': {
-                fd_req = open(req, O_WRONLY);
-                if (fd_req == -1) { perror("open req"); exit(1); }
-                
-                // Envoyer l'opcode TERMINATE (0x4b49)
-                write_u16(fd_req, 0x4b49); 
-                close(fd_req);
-
-                // Attendre la réponse OK du démon
-                fd_rep = open(rep, O_RDONLY);
-                if (read_u16(fd_rep) == REP_OK) {
-                    printf("Démon arrêté avec succès.\n");
-                }
-                close(fd_rep);
-                break;
+            close(fd_rep);
+            break;
+        }
+        case 'q': {
+            fd_req = open(req, O_WRONLY);
+            if (fd_req == -1) {
+                perror("open req");
+                exit(1);
             }
 
-            case '?':
-                fprintf(stderr, "Usage: %s [-P PIPES_DIR] [-l ] [-x id] [-o id] [-e id]\n", argv[0]);
-                exit(EXIT_FAILURE);
+            write_u16(fd_req, 0x4b49);
+            close(fd_req);
+
+            fd_rep = open(rep, O_RDONLY);
+            if (read_u16(fd_rep) == REP_OK) {
+                printf("Démon arrêté avec succès.\n");
+            }
+            close(fd_rep);
+            break;
+        }
+
+        case '?':
+            fprintf(stderr, "Usage: %s [-P PIPES_DIR] [-l ] [-x id] [-o id] [-e id] [-r id]\n", argv[0]);
+            exit(EXIT_FAILURE);
         }
     }
-
 }

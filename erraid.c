@@ -4,19 +4,59 @@
 #include "task_runner.h"
 #include "parsing_tasks.h"
 #include "protocole.h"
-#include <poll.h> 
-
+#include <poll.h>
 
 extern char *optarg;
 extern int optind;
-char req [256] ; char rep [256] ; 
+char req[256];
+char rep[256];
 
-
-volatile sig_atomic_t running = 1; 
+volatile sig_atomic_t running = 1;
 
 void handler_arret(int sig) {
-    (void)sig; 
-    running = 0; 
+    (void)sig;
+    running = 0;
+}
+
+int remove_directory(const char *path) {
+    DIR *d = opendir(path);
+    size_t path_len = strlen(path);
+    int r = -1;
+
+    if (d) {
+        struct dirent *p;
+        r = 0;
+        while (!r && (p = readdir(d))) {
+            int r2 = -1;
+            char *buf;
+            size_t len;
+
+            if (!strcmp(p->d_name, ".") || !strcmp(p->d_name, ".."))
+                continue;
+
+            len = path_len + strlen(p->d_name) + 2;
+            buf = malloc(len);
+
+            if (buf) {
+                struct stat statbuf;
+                snprintf(buf, len, "%s/%s", path, p->d_name);
+                if (!stat(buf, &statbuf)) {
+                    if (S_ISDIR(statbuf.st_mode))
+                        r2 = remove_directory(buf);
+                    else
+                        r2 = unlink(buf);
+                }
+                free(buf);
+            }
+            r = r2;
+        }
+        closedir(d);
+    }
+
+    if (!r)
+        r = rmdir(path);
+
+    return r;
 }
 
 void write_cmd_recursive(int fd, command *cmd) {
@@ -27,7 +67,7 @@ void write_cmd_recursive(int fd, command *cmd) {
             write_u32(fd, cmd->args.ARGV[i].LENGTH);
             write(fd, cmd->args.ARGV[i].DATA, cmd->args.ARGV[i].LENGTH);
         }
-    } else if (cmd->type == TYPE_SEQ) { 
+    } else if (cmd->type == TYPE_SEQ) {
         write_u32(fd, cmd->combinaison.ncmds);
         for (uint32_t i = 0; i < cmd->combinaison.ncmds; i++) {
             write_cmd_recursive(fd, &cmd->combinaison.sous_command[i]);
@@ -35,36 +75,70 @@ void write_cmd_recursive(int fd, command *cmd) {
     }
 }
 
+void traiter_remove(int fd_req, char *rep_path, char *base_path, tasks **T, uint64_t *nbtasks) {
+    uint64_t id_be, id;
+    if (read_all(fd_req, &id_be, 8) < 0) return;
+    id = be64toh(id_be);
+
+    printf("[Client] Demande de suppression pour ID %llu\n", (unsigned long long)id);
+
+    int index = -1;
+    for (uint64_t i = 0; i < *nbtasks; i++) {
+        if ((*T)[i].ID == id) {
+            index = i;
+            break;
+        }
+    }
+
+    int fd_rep = open(rep_path, O_RDWR);
+    if (fd_rep == -1) return;
+
+    if (index == -1) {
+        write_u16(fd_rep, 0x4552);
+        write_u16(fd_rep, 0x4E46);
+    } else {
+        char dir_path[512];
+        snprintf(dir_path, sizeof(dir_path), "%s/%llu", base_path, (unsigned long long)id);
+        remove_directory(dir_path);
+
+        if (index != *nbtasks - 1) {
+            (*T)[index] = (*T)[*nbtasks - 1];
+        }
+        (*nbtasks)--;
+
+        write_u16(fd_rep, REP_OK);
+    }
+    close(fd_rep);
+}
+
 void traiter_xoe(char *rep_path, char *base_path, uint64_t id, char *filename) {
     int fd_rep = open(rep_path, O_RDWR);
     if (fd_rep == -1) return;
 
     char dir_path[512];
-    snprintf(dir_path, sizeof(dir_path), "%s/%llu",
-             base_path, (unsigned long long)id);
+    snprintf(dir_path, sizeof(dir_path), "%s/%llu", base_path, (unsigned long long)id);
 
     struct stat st_task;
     if (stat(dir_path, &st_task) == -1) {
         int err = errno;
-        write_u16(fd_rep, 0x4552);       
+        write_u16(fd_rep, 0x4552);
 
         if (err == ENOENT) {
-            write_u16(fd_rep, 0x4E46);   
+            write_u16(fd_rep, 0x4E46);
         } else {
-            write_u16(fd_rep, 0x4E52);  
+            write_u16(fd_rep, 0x4E52);
         }
         close(fd_rep);
         return;
     }
 
     char file_path[512];
-    snprintf(file_path, sizeof(file_path), "%s/%llu/%s",
-             base_path, (unsigned long long)id, filename);
+    snprintf(file_path, sizeof(file_path), "%s/%llu/%s", base_path, (unsigned long long)id, filename);
 
     int fd_file = open(file_path, O_RDONLY);
     if (fd_file == -1) {
-        write_u16(fd_rep, 0x4552);        
-        write_u16(fd_rep, 0x4E52);       
+        write_u16(fd_rep, 0x4552);
+        write_u16(fd_rep, 0x4E52);
         close(fd_rep);
         return;
     }
@@ -89,12 +163,11 @@ void traiter_xoe(char *rep_path, char *base_path, uint64_t id, char *filename) {
     close(fd_rep);
 }
 
-
 void lister_taches(char *rep_path, tasks *T, uint64_t nbtasks) {
     int fd_rep = open(rep_path, O_RDWR);
     if (fd_rep == -1) return;
 
-    write_u16(fd_rep, 0x4F4B); 
+    write_u16(fd_rep, 0x4F4B);
     write_u32(fd_rep, (uint32_t)nbtasks);
 
     for (uint64_t i = 0; i < nbtasks; i++) {
@@ -106,51 +179,47 @@ void lister_taches(char *rep_path, tasks *T, uint64_t nbtasks) {
     }
     close(fd_rep);
 }
+
 void handler_alarme(int sig) {
-    (void)sig; 
+    (void)sig;
 }
 
-int main (int argc, char *argv[]) {
-    char chemin_tasks [256] , chemin_pipes[256]; 
-    char * user = getenv("USER") ;
+int main(int argc, char *argv[]) {
+    char chemin_tasks[256], chemin_pipes[256];
+    char *user = getenv("USER");
 
     char *arg_r = NULL;
     char *arg_p = NULL;
-    int avantPlan = 0 ;
-    int opt;  
+    int avantPlan = 0;
+    int opt;
     while ((opt = getopt(argc, argv, "R:P:F")) != -1) {
         switch (opt) {
-            case 'R': arg_r = optarg; break;
-            case 'P': arg_p = optarg; break;
-            case 'F': avantPlan = 1 ; break ; 
-            case '?': 
-                fprintf(stderr, "Usage: %s [-r RUN_DIRECTORY] [-p PIPES_DIR]\n", argv[0]);
-                exit(EXIT_FAILURE);
+        case 'R': arg_r = optarg; break;
+        case 'P': arg_p = optarg; break;
+        case 'F': avantPlan = 1; break;
+        case '?':
+            fprintf(stderr, "Usage: %s [-r RUN_DIRECTORY] [-p PIPES_DIR]\n", argv[0]);
+            exit(EXIT_FAILURE);
         }
     }
+
     if (!avantPlan) {
-        printf("Détachement du terminal... (mode démon)\n");
-    pid_t pid = fork();
-    if (pid < 0) {
-        perror("fork");
-        exit(1);
-    }
-    if (pid > 0) {
-        // C'est le processus PARENT. 
-        // Il doit mourir pour rendre la main au shell.
-        exit(0); 
-    }
+        pid_t pid = fork();
+        if (pid < 0) {
+            perror("fork");
+            exit(1);
+        }
+        if (pid > 0) {
+            exit(0);
+        }
 
-    // Ici, nous sommes dans le FILS (le futur démon)
-    setsid(); // Création d'une nouvelle session [cite: 279]
-    
-    // Optionnel : deuxième fork pour garantir qu'on ne peut pas réacquérir de terminal
-    if (fork() > 0) exit(0); 
+        setsid();
 
-    // Fermeture des flux pour ne plus écrire dans le terminal du shell
-    close(STDIN_FILENO);
-    close(STDOUT_FILENO);
-    close(STDERR_FILENO);
+        if (fork() > 0) exit(0);
+
+        close(STDIN_FILENO);
+        close(STDOUT_FILENO);
+        close(STDERR_FILENO);
     }
 
     if (arg_r) snprintf(chemin_tasks, sizeof(chemin_tasks), "%s/tasks", arg_r);
@@ -165,50 +234,48 @@ int main (int argc, char *argv[]) {
     printf("Chemin tasks = %s\n", chemin_tasks);
     printf("Chemin pipes = %s\n", chemin_pipes);
 
-    snprintf(req , sizeof req , "%s/erraid-request-pipe", chemin_pipes) ; 
-    snprintf(rep , sizeof rep , "%s/erraid-reply-pipe", chemin_pipes) ;
+    snprintf(req, sizeof req, "%s/erraid-request-pipe", chemin_pipes);
+    snprintf(rep, sizeof rep, "%s/erraid-reply-pipe", chemin_pipes);
 
-   if (!arg_p && !arg_r && user) {
+    if (!arg_p && !arg_r && user) {
         char parent[256];
         snprintf(parent, sizeof(parent), "/tmp/%s/erraid", user);
-        mkdir(parent, 0700); 
+        mkdir(parent, 0700);
     }
     struct stat st;
     if (stat(chemin_pipes, &st) == -1) mkdir(chemin_pipes, 0700);
 
-    if (mkfifo (req , 0622) == -1) {
-            if (errno != EEXIST) { 
-                perror("mkfifo requete");
-                exit(EXIT_FAILURE);
-            } 
+    if (mkfifo(req, 0622) == -1) {
+        if (errno != EEXIST) {
+            perror("mkfifo requete");
+            exit(EXIT_FAILURE);
         }
-        if (mkfifo (rep , 0622) == -1) {
-            if (errno != EEXIST) { 
-                perror("mkfifo reponse");
-                exit(EXIT_FAILURE);
-            } 
+    }
+    if (mkfifo(rep, 0622) == -1) {
+        if (errno != EEXIST) {
+            perror("mkfifo reponse");
+            exit(EXIT_FAILURE);
         }
-        
+    }
+
     struct sigaction sa_ign;
     sa_ign.sa_handler = SIG_IGN;
     sigemptyset(&sa_ign.sa_mask);
     sa_ign.sa_flags = 0;
     sigaction(SIGPIPE, &sa_ign, NULL);
 
-
     struct sigaction sa_arret;
     sa_arret.sa_handler = handler_arret;
     sigemptyset(&sa_arret.sa_mask);
-    sa_arret.sa_flags = 0; 
-    sigaction(SIGINT, &sa_arret, NULL); 
+    sa_arret.sa_flags = 0;
+    sigaction(SIGINT, &sa_arret, NULL);
     sigaction(SIGTERM, &sa_arret, NULL);
-    
-    int fd_req = open(req, O_RDWR); 
+
+    int fd_req = open(req, O_RDWR);
     if (fd_req == -1) { perror("open req"); unlink(req); unlink(rep); return 1; }
 
     uint64_t nbtasks = number_of_tasks(chemin_tasks);
-    printf("Nombre de tâches trouvées : %llu\n",
-           (unsigned long long)nbtasks);
+    printf("Nombre de tâches trouvées : %llu\n", (unsigned long long)nbtasks);
 
     tasks *T = read_tasks(chemin_tasks);
 
@@ -221,34 +288,34 @@ int main (int argc, char *argv[]) {
     printf("Démon prêt.\n");
     fflush(stdout);
 
-    struct pollfd fds[1] ; 
-    fds[0].fd = fd_req ; 
-    fds[0].events = POLLIN ; 
+    struct pollfd fds[1];
+    fds[0].fd = fd_req;
+    fds[0].events = POLLIN;
 
-    time_t last_check = time(NULL) ; 
-    struct tm tm_last ; 
-    localtime_r(&last_check , &tm_last) ;
-    int last_minute = tm_last.tm_min ;
+    time_t last_check = time(NULL);
+    struct tm tm_last;
+    localtime_r(&last_check, &tm_last);
+    int last_minute = tm_last.tm_min;
 
     while (running) {
-        
+
         time_t now = time(NULL);
         struct tm tm_now;
         localtime_r(&now, &tm_now);
-        
-        int timeout_ms ; 
-        if  (tm_now.tm_min != last_minute) {
-            timeout_ms = 0 ;
+
+        int timeout_ms;
+        if (tm_now.tm_min != last_minute) {
+            timeout_ms = 0;
         } else {
-            int seconds_left = 60 - tm_now.tm_sec ; 
+            int seconds_left = 60 - tm_now.tm_sec;
             timeout_ms = seconds_left * 1000;
         }
 
-        int ret = poll(fds , 1 , timeout_ms) ; 
+        int ret = poll(fds, 1, timeout_ms);
         if (ret == -1) {
-            if (errno == EINTR) continue ; 
-            perror("poll") ; 
-            break ; 
+            if (errno == EINTR) continue;
+            perror("poll");
+            break;
         }
 
         now = time(NULL);
@@ -257,80 +324,70 @@ int main (int argc, char *argv[]) {
             printf("[Timer] Nouvelle minute\n");
             for (uint64_t i = 0; i < nbtasks; i++) {
                 if (should_run(&T[i], &tm_now)) {
-                    pid_t pid = fork() ; 
+                    pid_t pid = fork();
                     if (pid == -1) {
-                        perror("fork") ;
-                        continue ; 
+                        perror("fork");
+                        continue;
                     }
                     if (pid == 0) {
                         close(fd_req);
                         if (fork() == 0) { execute_task(&T[i]); exit(0); }
                         exit(0);
                     }
-                    int status ;
-                    if (waitpid(pid, &status , 0) == -1) {
-                        perror("waitpid") ;
+                    int status;
+                    if (waitpid(pid, &status, 0) == -1) {
+                        perror("waitpid");
                     }
                 }
             }
-            last_minute = tm_now.tm_min ; 
+            last_minute = tm_now.tm_min;
         }
-        
-        if (ret > 0 && (fds[0].revents & POLLIN) ) {
+
+        if (ret > 0 && (fds[0].revents & POLLIN)) {
             uint16_t opcode_be;
             ssize_t n = read(fd_req, &opcode_be, 2);
 
-            if (n != 2) continue ; 
+            if (n != 2) continue;
             uint16_t opcode = be16toh(opcode_be);
-            if ( opcode == LIST) { // l 
+            if (opcode == LIST) {
                 printf("[Client] Reçu LS\n");
                 lister_taches(rep, T, nbtasks);
-            }
-            else if (opcode == TIMES_EXITCODES) { // x
+            } else if (opcode == TIMES_EXITCODES) {
                 uint64_t id_be, id;
-                read(fd_req, &id_be, 8); 
+                read(fd_req, &id_be, 8);
                 id = be64toh(id_be);
-                
+
                 printf("[Client] Historique demandé pour ID %llu\n", (unsigned long long)id);
                 traiter_xoe(rep, chemin_tasks, id, "times-exitcodes");
-            }
-
-            else if (opcode == STDOUT) { // o 
+            } else if (opcode == STDOUT) {
                 uint64_t id_be, id;
                 read(fd_req, &id_be, 8);
                 id = be64toh(id_be);
 
                 printf("[Client] Stdout demandé pour ID %llu\n", (unsigned long long)id);
                 traiter_xoe(rep, chemin_tasks, id, "stdout");
-            }
-
-            else if (opcode == STDERR) { // e
+            } else if (opcode == STDERR) {
                 uint64_t id_be, id;
                 read(fd_req, &id_be, 8);
                 id = be64toh(id_be);
 
                 printf("[Client] Stderr demandé pour ID %llu\n", (unsigned long long)id);
                 traiter_xoe(rep, chemin_tasks, id, "stderr");
-            }
-            else if (opcode == TERM) { // 0x4b49 ('TM')
+            } else if (opcode == 0x524D) {
+                traiter_remove(fd_req, rep, chemin_tasks, &T, &nbtasks);
+            } else if (opcode == TERM) {
                 printf("[Client] Requête de terminaison reçue.\n");
                 int fd_rep = open(rep, O_RDWR);
-                if (fd_rep == -1) perror("fd_rep") ; break ;
-                // Envoyer la réponse OK au client avant de fermer
-                write_u16(fd_rep, REP_OK); 
-                close(fd_rep) ; 
-                running = 0; // Sort de la boucle principale pour terminer proprement
+                if (fd_rep == -1) perror("fd_rep"); break;
+                write_u16(fd_rep, REP_OK);
+                close(fd_rep);
+                running = 0;
             }
         }
-        
-        }
+    }
 
     close(fd_req);
-    unlink(req); 
+    unlink(req);
     unlink(rep);
     free(T);
-
-  
 }
-
-
