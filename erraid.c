@@ -184,6 +184,107 @@ void handler_alarme(int sig) {
     (void)sig;
 }
 
+uint64_t get_next_id(tasks *T, uint64_t nbtasks) {
+    uint64_t max_id = 0;
+    if (nbtasks == 0) return 1;
+    for (uint64_t i = 0; i < nbtasks; i++) {
+        if (T[i].ID > max_id) max_id = T[i].ID;
+    }
+    return max_id + 1;
+}
+
+int save_cmd_recursive(int fd_req, char *dir_path) {
+    if (mkdir(dir_path, 0700) == -1 && errno != EEXIST) {
+        perror("mkdir cmd"); return -1;
+    }
+
+    uint16_t type_be = read_u16(fd_req); 
+    
+    char path_type[512];
+    snprintf(path_type, sizeof(path_type), "%s/type", dir_path);
+    
+    int fd_type = open(path_type, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd_type == -1) { perror("open type"); return -1; }
+    write_u16(fd_type, type_be); 
+    close(fd_type);
+
+    uint16_t type = type_be; 
+
+    if (type == TYPE_SIMPLE) {
+        uint32_t argc = read_u32(fd_req);
+
+        char path_argv[512];
+        snprintf(path_argv, sizeof(path_argv), "%s/argv", dir_path);
+        int fd_argv = open(path_argv, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        if (fd_argv == -1) return -1;
+
+        write_u32(fd_argv, argc); 
+
+        for (uint32_t i = 0; i < argc; i++) {
+            uint32_t len = read_u32(fd_req);
+            write_u32(fd_argv, len);         
+            
+            char *buf = malloc(len + 1);
+            read_all(fd_req, buf, len);     
+            write(fd_argv, buf, len);       
+            free(buf);
+        }
+        close(fd_argv);
+
+    } else if (type == TYPE_SEQ || type == TYPE_PL || type == TYPE_IF) {
+        uint32_t ncmds = read_u32(fd_req);
+        
+        for (uint32_t i = 0; i < ncmds; i++) {
+            char sub_path[512];
+            snprintf(sub_path, sizeof(sub_path), "%s/%u", dir_path, i);
+            save_cmd_recursive(fd_req, sub_path);
+        }
+    }
+    return 0;
+}
+
+void traiter_create(int fd_req, char *rep_path, char *base_path, tasks **T, uint64_t *nbtasks) {
+    printf("[Client] Demande de creation (CR)\n");
+
+    uint64_t new_id = get_next_id(*T, *nbtasks);
+    
+    char task_dir[512];
+    snprintf(task_dir, sizeof(task_dir), "%s/%llu", base_path, (unsigned long long)new_id);
+    if (mkdir(task_dir, 0700) == -1) { 
+        perror("mkdir task"); 
+        return; 
+    }
+    
+    uint64_t min = read_u64(fd_req);
+    uint32_t hour = read_u32(fd_req);
+    uint8_t day;
+    read_all(fd_req, &day, 1);
+
+    char path_timing[512];
+    snprintf(path_timing, sizeof(path_timing), "%s/timing", task_dir);
+    int fd_time = open(path_timing, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    write_u64(fd_time, min);
+    write_u32(fd_time, hour);
+    write(fd_time, &day, 1);
+    close(fd_time);
+
+    char path_cmd[512];
+    snprintf(path_cmd, sizeof(path_cmd), "%s/cmd", task_dir);
+    save_cmd_recursive(fd_req, path_cmd);
+
+    if (*T) free(*T);
+    *T = read_tasks(base_path);
+    *nbtasks = number_of_tasks(base_path);
+
+    int fd_rep = open(rep_path, O_WRONLY);
+    if (fd_rep != -1) {
+        write_u16(fd_rep, REP_OK);
+        write_u64(fd_rep, new_id);
+        close(fd_rep);
+    }
+    printf("[Erraid] Tache creee : ID %llu\n", (unsigned long long)new_id);
+}
+
 int main(int argc, char *argv[]) {
     char chemin_tasks[256], chemin_pipes[256];
     char *user = getenv("USER");
@@ -349,10 +450,15 @@ int main(int argc, char *argv[]) {
 
             if (n != 2) continue;
             uint16_t opcode = be16toh(opcode_be);
+
             if (opcode == LIST) {
                 printf("[Client] Reçu LS\n");
                 lister_taches(rep, T, nbtasks);
-            } else if (opcode == TIMES_EXITCODES) {
+            } 
+            else if (opcode == 0x4352) { 
+                traiter_create(fd_req, rep, chemin_tasks, &T, &nbtasks);
+            }
+            else if (opcode == TIMES_EXITCODES) {
                 uint64_t id_be, id;
                 read(fd_req, &id_be, 8);
                 id = be64toh(id_be);
