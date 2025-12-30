@@ -90,7 +90,7 @@ void traiter_remove(int fd_req, char *rep_path, char *base_path, tasks **T, uint
         }
     }
 
-    int fd_rep = open(rep_path, O_RDWR);
+    int fd_rep = open(rep_path, O_WRONLY);
     if (fd_rep == -1) return;
 
     if (index == -1) {
@@ -112,7 +112,8 @@ void traiter_remove(int fd_req, char *rep_path, char *base_path, tasks **T, uint
 }
 
 void traiter_xoe(char *rep_path, char *base_path, uint64_t id, char *filename) {
-    int fd_rep = open(rep_path, O_RDWR);
+    // CORRECTION: O_WRONLY au lieu de O_RDWR
+    int fd_rep = open(rep_path, O_WRONLY);
     if (fd_rep == -1) return;
 
     char dir_path[512];
@@ -164,7 +165,8 @@ void traiter_xoe(char *rep_path, char *base_path, uint64_t id, char *filename) {
 }
 
 void lister_taches(char *rep_path, tasks *T, uint64_t nbtasks) {
-    int fd_rep = open(rep_path, O_RDWR);
+    // CORRECTION: O_WRONLY au lieu de O_RDWR
+    int fd_rep = open(rep_path, O_WRONLY);
     if (fd_rep == -1) return;
 
     write_u16(fd_rep, 0x4F4B);
@@ -293,34 +295,17 @@ int main(int argc, char *argv[]) {
     char *arg_p = NULL;
     int avantPlan = 0;
     int opt;
-    while ((opt = getopt(argc, argv, "R:P:F")) != -1) {
+    while ((opt = getopt(argc, argv, "r:R:p:P:F")) != -1) {
         switch (opt) {
+        case 'r':
         case 'R': arg_r = optarg; break;
+        case 'p':
         case 'P': arg_p = optarg; break;
         case 'F': avantPlan = 1; break;
         case '?':
             fprintf(stderr, "Usage: %s [-r RUN_DIRECTORY] [-p PIPES_DIR]\n", argv[0]);
             exit(EXIT_FAILURE);
         }
-    }
-
-    if (!avantPlan) {
-        pid_t pid = fork();
-        if (pid < 0) {
-            perror("fork");
-            exit(1);
-        }
-        if (pid > 0) {
-            exit(0);
-        }
-
-        setsid();
-
-        if (fork() > 0) exit(0);
-
-        close(STDIN_FILENO);
-        close(STDOUT_FILENO);
-        close(STDERR_FILENO);
     }
 
     if (arg_r) snprintf(chemin_tasks, sizeof(chemin_tasks), "%s/tasks", arg_r);
@@ -357,6 +342,25 @@ int main(int argc, char *argv[]) {
             perror("mkfifo reponse");
             exit(EXIT_FAILURE);
         }
+    }
+
+    if (!avantPlan) {
+        pid_t pid = fork();
+        if (pid < 0) {
+            perror("fork");
+            exit(1);
+        }
+        if (pid > 0) {
+            exit(0);
+        }
+
+        setsid();
+
+        if (fork() > 0) exit(0);
+
+        close(STDIN_FILENO);
+        close(STDOUT_FILENO);
+        close(STDERR_FILENO);
     }
 
     struct sigaction sa_ign;
@@ -483,10 +487,12 @@ int main(int argc, char *argv[]) {
                 traiter_remove(fd_req, rep, chemin_tasks, &T, &nbtasks);
             } else if (opcode == TERM) {
                 printf("[Client] Requête de terminaison reçue.\n");
-                int fd_rep = open(rep, O_RDWR);
-                if (fd_rep == -1) perror("fd_rep"); break;
-                write_u16(fd_rep, REP_OK);
-                close(fd_rep);
+                int fd_rep = open(rep, O_WRONLY);
+                if (fd_rep == -1) perror("fd_rep"); 
+                else {
+                    write_u16(fd_rep, REP_OK);
+                    close(fd_rep);
+                }
                 running = 0;
             }
         }

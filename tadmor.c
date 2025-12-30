@@ -12,7 +12,6 @@ uint64_t parse_timing(char *str, int max_val) {
     char *s = strdup(str);
     char *token = strtok(s, ",");
     while (token) {
-        // CORRECTION ICI : '-' (char) au lieu de "-" (string)
         char *dash = strchr(token, '-');
         if (dash) {
             *dash = '\0';
@@ -32,7 +31,6 @@ uint64_t parse_timing(char *str, int max_val) {
 }
 
 void print_timing(uint64_t val, int max) {
-    // Cas particulier : tous les bits à 1
     if (val == ((1ULL << max) - 1) || (max == 60 && (val & ((1ULL << 60) - 1)) == ((1ULL << 60) - 1))) {
         printf("*");
         return;
@@ -110,7 +108,6 @@ int main(int argc, char *argv[]) {
     char chemin_pipes[256], req[256], rep[256];
     char *user = getenv("USER");
     
-    // Initialisation sécurisée
     if (user) snprintf(chemin_pipes, sizeof chemin_pipes, "/tmp/%s/erraid/pipes", user);
     else snprintf(chemin_pipes, sizeof chemin_pipes, "/tmp/erraid/pipes");
 
@@ -121,8 +118,9 @@ int main(int argc, char *argv[]) {
     uint32_t hour = (1U << 24) - 1;  
     uint8_t day = 0x7F; 
 
-    while ((opt = getopt(argc, argv, "lP:x:o:e:qr:cm:H:d:")) != -1) {
+    while ((opt = getopt(argc, argv, "lP:p:x:o:e:qr:cm:H:d:")) != -1) {
         switch (opt) {
+        case 'p': 
         case 'P':
             snprintf(chemin_pipes, sizeof(chemin_pipes), "%s", optarg);
             break;
