@@ -40,19 +40,15 @@ void read_cmd (command * c , char * chemin, char * chemin_cmd) {
             char chemin_argv [256] ; 
             snprintf(chemin_argv , sizeof chemin_argv ,"%s/argv" , chemin_cmd) ;
             
-            // --- CORRECTION 1 : Vérifier l'ouverture ---
             int fd_argv = open (chemin_argv , O_RDONLY) ; 
             if (fd_argv == -1) {
-                // Si pas de fichier argv, on met à 0 pour éviter le crash
                 c->args.ARGC = 0;
                 c->args.ARGV = NULL;
                 return;
             }
-
             ssize_t n ; 
             uint32_t argc ; 
-            
-            // --- CORRECTION 2 : Vérifier la lecture ---
+
             n = read (fd_argv , &argc , 4 ) ;  
             if (n != 4) {
                 close(fd_argv);
@@ -60,10 +56,8 @@ void read_cmd (command * c , char * chemin, char * chemin_cmd) {
                 c->args.ARGV = NULL;
                 return;
             }
-
             c->args.ARGC = be32toh(argc) ; 
-            
-            // Sécurité anti-crash sur valeurs aberrantes
+
             if (c->args.ARGC > 1000) { 
                 c->args.ARGC = 0; 
                 close(fd_argv); 
@@ -72,7 +66,6 @@ void read_cmd (command * c , char * chemin, char * chemin_cmd) {
 
             c->args.ARGV = malloc(c->args.ARGC * sizeof(string));
             
-            // Sécurité malloc
             if (c->args.ARGV == NULL) {
                 c->args.ARGC = 0;
                 close(fd_argv);
@@ -82,7 +75,6 @@ void read_cmd (command * c , char * chemin, char * chemin_cmd) {
             for (uint32_t i = 0 ; i < c->args.ARGC ; ++i ) {
                 uint32_t length ; 
                 n = read (fd_argv , &length , 4) ;
-                // Si la lecture échoue, on arrête tout
                 if (n != 4) { break; } 
 
                 length = be32toh(length);
