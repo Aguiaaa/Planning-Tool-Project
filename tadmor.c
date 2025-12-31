@@ -122,7 +122,7 @@ int main(int argc, char *argv[]) {
     uint32_t hour = (1U << 24) - 1;  
     uint8_t day = 0x7F; 
 
-    while ((opt = getopt(argc, argv, "lP:x:o:e:qr:cm:H:d:snp")) != -1) {
+    while ((opt = getopt(argc, argv, "+lP:x:o:e:qr:cm:H:d:snp")) != -1) {
         switch (opt) {
         case 'P':
             snprintf(chemin_pipes, sizeof(chemin_pipes), "%s", optarg);
