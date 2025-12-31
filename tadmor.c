@@ -115,12 +115,13 @@ int main(int argc, char *argv[]) {
     int opt, fd_req, fd_rep;
     int create_mode = 0;
     int seq_mode = 0; 
+    int abstract_mode = 0;
     
     uint64_t min = (1ULL << 60) - 1; 
     uint32_t hour = (1U << 24) - 1;  
     uint8_t day = 0x7F; 
 
-    while ((opt = getopt(argc, argv, "lP:p:x:o:e:qr:cm:H:d:s")) != -1) {
+    while ((opt = getopt(argc, argv, "lP:p:x:o:e:qr:cm:H:d:sn")) != -1) {
         switch (opt) {
         case 'p': 
         case 'P':
@@ -176,6 +177,10 @@ int main(int argc, char *argv[]) {
 
         case 's': 
             seq_mode = 1;
+            break;
+
+        case 'n':  
+            abstract_mode = 1;
             break;
 
         case 'm':
@@ -251,7 +256,7 @@ int main(int argc, char *argv[]) {
                     total_lu += n;
                 }
             } else {
-                fprintf(stderr, "Erreur : Tache inconnue ou fichier vide.\n");
+                fprintf(stderr, "Erreur : Tache inconnue ou Tache non.\n");
                 exit(1);
             }
             close(fd_rep);
@@ -340,6 +345,12 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Usage: %s [-P PIPES_DIR] [-l] [-x id] ... [-c ...] [-s ...]\n", argv[0]);
             exit(EXIT_FAILURE);
         }
+    }
+
+    if (abstract_mode) {
+        min = 0;
+        hour = 0;
+        day = 0;
     }
 
     if (create_mode) {

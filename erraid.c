@@ -250,7 +250,7 @@ int save_cmd_recursive(int fd_req, char *dir_path) {
     write_u16(fd_type, type_be); 
     close(fd_type);
 
-    uint16_t type = type_be; 
+    uint16_t type = type_be;
 
     if (type == TYPE_SIMPLE) {
         uint32_t argc = read_u32(fd_req);
