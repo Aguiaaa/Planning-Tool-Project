@@ -113,7 +113,7 @@ void write_cmd_recursive(int fd, command *cmd) {
             write_u32(fd, cmd->args.ARGV[i].LENGTH);
             write(fd, cmd->args.ARGV[i].DATA, cmd->args.ARGV[i].LENGTH);
         }
-    } else if (cmd->type == TYPE_SEQ || cmd->type == TYPE_PL) {
+    } else if (cmd->type == TYPE_SEQ || cmd->type == TYPE_PL || cmd->type == TYPE_IF) {
         write_u32(fd, cmd->combinaison.ncmds);
         for (uint32_t i = 0; i < cmd->combinaison.ncmds; i++) {
             write_cmd_recursive(fd, &cmd->combinaison.sous_command[i]);
@@ -393,7 +393,6 @@ void traiter_create_seq(int fd_req, char *rep_path, char *base_path, tasks **T, 
     printf("[Erraid] Tache Sequence creee : ID %llu\n", (unsigned long long)new_id);
 }
 
-
 void traiter_create_pl(int fd_req, char *rep_path, char *base_path, tasks **T, uint64_t *nbtasks) {
     printf("[Client] Demande de creation PIPELINE (CP)\n");
 
@@ -458,6 +457,80 @@ void traiter_create_pl(int fd_req, char *rep_path, char *base_path, tasks **T, u
         close(fd_rep);
     }
     printf("[Erraid] Tache Pipeline creee : ID %llu\n", (unsigned long long)new_id);
+}
+
+void traiter_create_if(int fd_req, char *rep_path, char *base_path, tasks **T, uint64_t *nbtasks) {
+    printf("[Client] Demande de creation IF (CI)\n");
+
+    uint64_t min = read_u64(fd_req);
+    uint32_t hour = read_u32(fd_req);
+    uint8_t day;
+    read_all(fd_req, &day, 1);
+
+    uint32_t count = read_u32(fd_req);
+    if (count < 2 || count > 3) {
+        fprintf(stderr, "[Erraid] Erreur: IF requiert 2 ou 3 taches, recu: %u\n", count);
+        for(uint32_t i=0; i<count; i++) { uint64_t tmp; read_all(fd_req, &tmp, 8); }
+        int fd_rep = open(rep_path, O_WRONLY);
+        if (fd_rep != -1) { write_u16(fd_rep, REP_ERR); close(fd_rep); }
+        return;
+    }
+
+    uint64_t *ids = malloc(count * sizeof(uint64_t));
+    for (uint32_t i = 0; i < count; i++) {
+        uint64_t tmp;
+        read_all(fd_req, &tmp, 8);
+        ids[i] = be64toh(tmp);
+    }
+
+    uint64_t new_id = get_next_id(*T, *nbtasks);
+    char task_dir[512];
+    snprintf(task_dir, sizeof(task_dir), "%s/%llu", base_path, (unsigned long long)new_id);
+    mkdir(task_dir, 0700);
+
+    char path_timing[512];
+    snprintf(path_timing, sizeof(path_timing), "%s/timing", task_dir);
+    int fd_time = open(path_timing, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    write_u64(fd_time, min);
+    write_u32(fd_time, hour);
+    write(fd_time, &day, 1);
+    close(fd_time);
+
+    char cmd_dir[512];
+    snprintf(cmd_dir, sizeof(cmd_dir), "%s/cmd", task_dir);
+    mkdir(cmd_dir, 0700);
+
+    char path_type[512];
+    snprintf(path_type, sizeof(path_type), "%s/type", cmd_dir);
+    int fd_type = open(path_type, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    write_u16(fd_type, TYPE_IF); 
+    close(fd_type);
+
+    for (uint32_t i = 0; i < count; i++) {
+        char src_cmd[512];
+        snprintf(src_cmd, sizeof(src_cmd), "%s/%llu/cmd", base_path, (unsigned long long)ids[i]);
+        
+        char dst_subdir[512];
+        snprintf(dst_subdir, sizeof(dst_subdir), "%s/%u", cmd_dir, i); 
+        
+        if (copy_recursive(src_cmd, dst_subdir) == -1) {
+            fprintf(stderr, "Erreur copie ou tache introuvable %llu\n", (unsigned long long)ids[i]);
+        }
+    }
+
+    free(ids);
+
+    if (*T) free(*T);
+    *T = read_tasks(base_path);
+    *nbtasks = number_of_tasks(base_path);
+
+    int fd_rep = open(rep_path, O_WRONLY);
+    if (fd_rep != -1) {
+        write_u16(fd_rep, REP_OK);
+        write_u64(fd_rep, new_id);
+        close(fd_rep);
+    }
+    printf("[Erraid] Tache IF creee : ID %llu\n", (unsigned long long)new_id);
 }
 
 int main(int argc, char *argv[]) {
@@ -638,8 +711,11 @@ int main(int argc, char *argv[]) {
             else if (opcode == CREATE_SEQ) {
                 traiter_create_seq(fd_req, rep, chemin_tasks, &T, &nbtasks);
             }
-            else if (opcode == CREATE_PL) { 
+            else if (opcode == CREATE_PL) {
                 traiter_create_pl(fd_req, rep, chemin_tasks, &T, &nbtasks);
+            }
+            else if (opcode == CREATE_IF) { 
+                traiter_create_if(fd_req, rep, chemin_tasks, &T, &nbtasks);
             }
             else if (opcode == TIMES_EXITCODES) {
                 uint64_t id_be, id;
