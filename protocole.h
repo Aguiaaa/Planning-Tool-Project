@@ -14,6 +14,7 @@
 #define REP_ERR     0x4552 // 'ER'
 #define CREATE      0x4352 // 'CR'
 #define CREATE_SEQ  0x4353 // 'CS' 
+#define CREATE_PL   0x4350 // 'CP'
 
 ssize_t read_all(int fd, void *buf, size_t count);
 uint16_t read_u16(int fd);

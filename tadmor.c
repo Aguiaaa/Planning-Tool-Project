@@ -115,17 +115,21 @@ int main(int argc, char *argv[]) {
     int opt, fd_req, fd_rep;
     int create_mode = 0;
     int seq_mode = 0; 
+    int pipe_mode = 0;
     int abstract_mode = 0;
     
     uint64_t min = (1ULL << 60) - 1; 
     uint32_t hour = (1U << 24) - 1;  
     uint8_t day = 0x7F; 
 
-    while ((opt = getopt(argc, argv, "lP:p:x:o:e:qr:cm:H:d:sn")) != -1) {
+    while ((opt = getopt(argc, argv, "lP:x:o:e:qr:cm:H:d:snp")) != -1) {
         switch (opt) {
-        case 'p': 
         case 'P':
             snprintf(chemin_pipes, sizeof(chemin_pipes), "%s", optarg);
+            break;
+
+        case 'p':
+            pipe_mode = 1;
             break;
 
         case 'l':
@@ -342,7 +346,7 @@ int main(int argc, char *argv[]) {
         }
 
         case '?':
-            fprintf(stderr, "Usage: %s [-P PIPES_DIR] [-l] [-x id] ... [-c ...] [-s ...]\n", argv[0]);
+            fprintf(stderr, "Usage: %s [-P PIPES_DIR] [-l] [-x id] ... [-c ...] [-s ...] [-p ...]\n", argv[0]);
             exit(EXIT_FAILURE);
         }
     }
@@ -440,6 +444,52 @@ int main(int argc, char *argv[]) {
         close(fd_rep);
         exit(0);
     }
+
+    if (pipe_mode) {
+        snprintf(req, sizeof(req), "%s/erraid-request-pipe", chemin_pipes);
+        snprintf(rep, sizeof(rep), "%s/erraid-reply-pipe", chemin_pipes);
+
+        if (optind >= argc) {
+            fprintf(stderr, "Usage: %s -p [timing] <ID_1> <ID_2> ...\n", argv[0]);
+            exit(EXIT_FAILURE);
+        }
+
+        int count = argc - optind;
+        uint64_t *ids = malloc(count * sizeof(uint64_t));
+        for (int i = 0; i < count; i++) {
+            ids[i] = strtoull(argv[optind + i], NULL, 10);
+        }
+
+        fd_req = open(req, O_WRONLY);
+        if (fd_req == -1) { perror("open req"); exit(1); }
+
+        write_u16(fd_req, CREATE_PL); 
+        write_u64(fd_req, min);
+        write_u32(fd_req, hour);
+        write(fd_req, &day, 1);
+
+        write_u32(fd_req, count);
+        for (int i = 0; i < count; i++) {
+            write_u64(fd_req, ids[i]);
+        }
+        
+        free(ids);
+        close(fd_req);
+
+        fd_rep = open(rep, O_RDONLY);
+        if (fd_rep == -1) { perror("open rep"); exit(1); }
+
+        uint16_t status = read_u16(fd_rep);
+        if (status == 0x4F4B) { 
+            uint64_t new_id = read_u64(fd_rep);
+            printf("Tache Pipeline créée avec succès. ID: %llu\n", (unsigned long long)new_id);
+        } else {
+            fprintf(stderr, "Erreur création pipeline (Code 0x%x)\n", status);
+        }
+        close(fd_rep);
+        exit(0);
+    }
+    
 
     return 0;
 }
