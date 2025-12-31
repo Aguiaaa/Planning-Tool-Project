@@ -256,7 +256,7 @@ int main(int argc, char *argv[]) {
                     total_lu += n;
                 }
             } else {
-                fprintf(stderr, "Erreur : Tache inconnue ou Tache non.\n");
+                fprintf(stderr, "Erreur : Tache inconnue ou Tache non executer.\n");
                 exit(1);
             }
             close(fd_rep);
