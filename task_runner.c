@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "erraid.h"
+#include "protocole.h"
 
 bool should_run(tasks *T, struct tm *tm_now) {
     return (T->tm.MINUTES & (1ULL << tm_now->tm_min)) &&
@@ -15,7 +16,7 @@ bool should_run(tasks *T, struct tm *tm_now) {
            (T->tm.DAYSOFWEEK & (1 << tm_now->tm_wday));
 }
 
-void log(tasks *T, int exit_code) {
+void log_execution(tasks *T, int exit_code) {
     char path[512];
     snprintf(path, sizeof(path), "%.*s/times-exitcodes",
              T->chemin.LENGTH, (char *)T->chemin.DATA);
@@ -26,13 +27,12 @@ void log(tasks *T, int exit_code) {
         return;
     }
 
-    uint64_t now = htobe64((uint64_t)time(NULL));
-    uint16_t code = htobe16((uint16_t)exit_code);
-
-    write(fd, &now, sizeof(now));
-    write(fd, &code, sizeof(code));
+    write_u64(fd, (uint64_t)time(NULL));
+    write_u16(fd, (uint16_t)exit_code);
+    
     close(fd);
 }
+
 
 int run(tasks *T, command *cmd) {
     if (cmd->type == TYPE_SIMPLE) {
@@ -45,10 +45,9 @@ int run(tasks *T, command *cmd) {
             args[cmd->args.ARGC] = NULL;
 
             execvp(args[0], args);
-            perror("Erreur execvp");
+            perror("execvp");
             exit(127);
         }
-
         int status;
         if (waitpid(pid, &status, 0) == -1) return -1;
         if (WIFEXITED(status)) return WEXITSTATUS(status);
@@ -63,15 +62,10 @@ int run(tasks *T, command *cmd) {
         int n = cmd->combinaison.ncmds;
         int prev_pipe = -1;
         int pipefd[2];
-        pid_t last_pid = 0;
-        int last_status = 0;
 
         for (int i = 0; i < n; i++) {
             if (i < n - 1) {
-                if (pipe(pipefd) == -1) {
-                    perror("pipe");
-                    return -1;
-                }
+                if (pipe(pipefd) == -1) { perror("pipe"); return -1; }
             }
 
             pid_t pid = fork();
@@ -80,13 +74,11 @@ int run(tasks *T, command *cmd) {
                     dup2(prev_pipe, STDIN_FILENO);
                     close(prev_pipe);
                 }
-
                 if (i < n - 1) {
                     dup2(pipefd[1], STDOUT_FILENO);
                     close(pipefd[1]);
                     close(pipefd[0]);
                 }
-
                 exit(run(T, &cmd->combinaison.sous_command[i]));
             }
 
@@ -95,28 +87,18 @@ int run(tasks *T, command *cmd) {
                 prev_pipe = pipefd[0];
                 close(pipefd[1]);
             }
-
-            last_pid = pid;
         }
-
         while (wait(NULL) > 0);
-
         return 0;
     } else if (cmd->type == TYPE_IF) {
         if (cmd->combinaison.ncmds < 2) return -1;
-
         int ret_cond = run(T, &cmd->combinaison.sous_command[0]);
 
-        if (ret_cond == 0) {
-            return run(T, &cmd->combinaison.sous_command[1]);
-        } else {
-            if (cmd->combinaison.ncmds >= 3) {
-                return run(T, &cmd->combinaison.sous_command[2]);
-            }
-        }
+        if (ret_cond == 0) return run(T, &cmd->combinaison.sous_command[1]);
+        else if (cmd->combinaison.ncmds >= 3) return run(T, &cmd->combinaison.sous_command[2]);
+        
         return 0;
     }
-
     return -1;
 }
 
@@ -129,15 +111,17 @@ void execute_task(tasks *T) {
     int fe = open(err, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 
     if (fo == -1 || fe == -1) {
-        perror("Erreur ouverture fichiers logs");
         if (fo != -1) close(fo);
         if (fe != -1) close(fe);
         return;
     }
+    
     dup2(fo, STDOUT_FILENO); 
     dup2(fe, STDERR_FILENO); 
     close(fo);
     close(fe);
+
     int status = run(T, T->commandes);
-    log(T, status);
+    
+    log_execution(T, status);
 }

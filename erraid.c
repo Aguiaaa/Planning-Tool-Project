@@ -4,7 +4,9 @@
 #include "task_runner.h"
 #include "parsing_tasks.h"
 #include "protocole.h"
-#include <poll.h>
+#include <signal.h>
+#include <time.h>
+#include <errno.h>
 
 extern char *optarg;
 extern int optind;
@@ -12,10 +14,16 @@ char req[256];
 char rep[256];
 
 volatile sig_atomic_t running = 1;
+volatile sig_atomic_t timer_expired = 0;
 
 void handler_arret(int sig) {
     (void)sig;
     running = 0;
+}
+
+void handler_timer(int sig) {
+    (void)sig;
+    timer_expired = 1;
 }
 
 int copy_file(const char *src, const char *dst) {
@@ -23,12 +31,19 @@ int copy_file(const char *src, const char *dst) {
     if (f1 == -1) return -1;
     
     int f2 = open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    if (f2 == -1) { close(f1); return -1; }
+    if (f2 == -1) {
+        close(f1);
+        return -1;
+    }
 
     char buf[4096];
     ssize_t n;
     while ((n = read(f1, buf, sizeof(buf))) > 0) {
-        if (write(f2, buf, n) != n) { close(f1); close(f2); return -1; }
+        if (write(f2, buf, n) != n) {
+            close(f1);
+            close(f2);
+            return -1;
+        }
     }
     close(f1);
     close(f2);
@@ -40,7 +55,8 @@ int copy_recursive(const char *src, const char *dst) {
     if (!d) return -1;
 
     if (mkdir(dst, 0700) == -1 && errno != EEXIST) {
-        closedir(d); return -1;
+        closedir(d);
+        return -1;
     }
 
     struct dirent *e;
@@ -77,8 +93,7 @@ int remove_directory(const char *path) {
             char *buf;
             size_t len;
 
-            if (!strcmp(p->d_name, ".") || !strcmp(p->d_name, ".."))
-                continue;
+            if (!strcmp(p->d_name, ".") || !strcmp(p->d_name, "..")) continue;
 
             len = path_len + strlen(p->d_name) + 2;
             buf = malloc(len);
@@ -87,10 +102,8 @@ int remove_directory(const char *path) {
                 struct stat statbuf;
                 snprintf(buf, len, "%s/%s", path, p->d_name);
                 if (!stat(buf, &statbuf)) {
-                    if (S_ISDIR(statbuf.st_mode))
-                        r2 = remove_directory(buf);
-                    else
-                        r2 = unlink(buf);
+                    if (S_ISDIR(statbuf.st_mode)) r2 = remove_directory(buf);
+                    else r2 = unlink(buf);
                 }
                 free(buf);
             }
@@ -99,9 +112,7 @@ int remove_directory(const char *path) {
         closedir(d);
     }
 
-    if (!r)
-        r = rmdir(path);
-
+    if (!r) r = rmdir(path);
     return r;
 }
 
@@ -113,7 +124,7 @@ void write_cmd_recursive(int fd, command *cmd) {
             write_u32(fd, cmd->args.ARGV[i].LENGTH);
             write(fd, cmd->args.ARGV[i].DATA, cmd->args.ARGV[i].LENGTH);
         }
-    } else if (cmd->type == TYPE_SEQ || cmd->type == TYPE_PL || cmd->type == TYPE_IF) {
+    } else {
         write_u32(fd, cmd->combinaison.ncmds);
         for (uint32_t i = 0; i < cmd->combinaison.ncmds; i++) {
             write_cmd_recursive(fd, &cmd->combinaison.sous_command[i]);
@@ -126,7 +137,7 @@ void traiter_remove(int fd_req, char *rep_path, char *base_path, tasks **T, uint
     if (read_all(fd_req, &id_be, 8) < 0) return;
     id = be64toh(id_be);
 
-    printf("[Client] Demande de suppression pour ID %llu\n", (unsigned long long)id);
+    printf("[Client] Suppression ID %llu\n", (unsigned long long)id);
 
     int index = -1;
     for (uint64_t i = 0; i < *nbtasks; i++) {
@@ -140,7 +151,7 @@ void traiter_remove(int fd_req, char *rep_path, char *base_path, tasks **T, uint
     if (fd_rep == -1) return;
 
     if (index == -1) {
-        write_u16(fd_rep, 0x4552);
+        write_u16(fd_rep, REP_ERR);
         write_u16(fd_rep, 0x4E46);
     } else {
         char dir_path[512];
@@ -161,43 +172,26 @@ void traiter_xoe(char *rep_path, char *base_path, uint64_t id, char *filename) {
     int fd_rep = open(rep_path, O_WRONLY);
     if (fd_rep == -1) return;
 
-    char dir_path[512];
-    snprintf(dir_path, sizeof(dir_path), "%s/%llu", base_path, (unsigned long long)id);
-
-    struct stat st_task;
-    if (stat(dir_path, &st_task) == -1) {
-        int err = errno;
-        write_u16(fd_rep, 0x4552);
-
-        if (err == ENOENT) {
-            write_u16(fd_rep, 0x4E46);
-        } else {
-            write_u16(fd_rep, 0x4E52);
-        }
-        close(fd_rep);
-        return;
-    }
-
     char file_path[512];
     snprintf(file_path, sizeof(file_path), "%s/%llu/%s", base_path, (unsigned long long)id, filename);
 
     int fd_file = open(file_path, O_RDONLY);
     if (fd_file == -1) {
-        write_u16(fd_rep, 0x4552);
-        write_u16(fd_rep, 0x4E52);
+        write_u16(fd_rep, REP_ERR);
+        char dir_path[512];
+        snprintf(dir_path, sizeof(dir_path), "%s/%llu", base_path, (unsigned long long)id);
+        struct stat st_task;
+        if (stat(dir_path, &st_task) == -1) write_u16(fd_rep, 0x4E46);
+        else write_u16(fd_rep, 0x4E52);
         close(fd_rep);
         return;
     }
-    write_u16(fd_rep, REP_OK);
 
+    write_u16(fd_rep, REP_OK);
     struct stat st;
     fstat(fd_file, &st);
-
-    if (strcmp(filename, "times-exitcodes") == 0) {
-        write_u32(fd_rep, (uint32_t)(st.st_size / 10));
-    } else {
-        write_u32(fd_rep, (uint32_t)st.st_size);
-    }
+    
+    write_u32(fd_rep, (uint32_t)st.st_size);
 
     char buf[1024];
     ssize_t n;
@@ -213,7 +207,7 @@ void lister_taches(char *rep_path, tasks *T, uint64_t nbtasks) {
     int fd_rep = open(rep_path, O_WRONLY);
     if (fd_rep == -1) return;
 
-    write_u16(fd_rep, 0x4F4B);
+    write_u16(fd_rep, REP_OK);
     write_u32(fd_rep, (uint32_t)nbtasks);
 
     for (uint64_t i = 0; i < nbtasks; i++) {
@@ -236,46 +230,32 @@ uint64_t get_next_id(tasks *T, uint64_t nbtasks) {
 }
 
 int save_cmd_recursive(int fd_req, char *dir_path) {
-    if (mkdir(dir_path, 0700) == -1 && errno != EEXIST) {
-        perror("mkdir cmd"); return -1;
-    }
+    if (mkdir(dir_path, 0700) == -1 && errno != EEXIST) return -1;
 
     uint16_t type_be = read_u16(fd_req); 
-    
     char path_type[512];
     snprintf(path_type, sizeof(path_type), "%s/type", dir_path);
-    
     int fd_type = open(path_type, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    if (fd_type == -1) { perror("open type"); return -1; }
     write_u16(fd_type, type_be); 
     close(fd_type);
 
-    uint16_t type = type_be;
-
-    if (type == TYPE_SIMPLE) {
+    if (type_be == TYPE_SIMPLE) {
         uint32_t argc = read_u32(fd_req);
-
         char path_argv[512];
         snprintf(path_argv, sizeof(path_argv), "%s/argv", dir_path);
         int fd_argv = open(path_argv, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-        if (fd_argv == -1) return -1;
-
         write_u32(fd_argv, argc); 
-
         for (uint32_t i = 0; i < argc; i++) {
             uint32_t len = read_u32(fd_req);
             write_u32(fd_argv, len);         
-            
             char *buf = malloc(len + 1);
             read_all(fd_req, buf, len);     
             write(fd_argv, buf, len);       
             free(buf);
         }
         close(fd_argv);
-
-    } else if (type == TYPE_SEQ || type == TYPE_PL || type == TYPE_IF) {
+    } else {
         uint32_t ncmds = read_u32(fd_req);
-        
         for (uint32_t i = 0; i < ncmds; i++) {
             char sub_path[512];
             snprintf(sub_path, sizeof(sub_path), "%s/%u", dir_path, i);
@@ -286,16 +266,12 @@ int save_cmd_recursive(int fd_req, char *dir_path) {
 }
 
 void traiter_create(int fd_req, char *rep_path, char *base_path, tasks **T, uint64_t *nbtasks) {
-    printf("[Client] Demande de creation (CR)\n");
-
+    printf("[Client] Creation (CR)\n");
     uint64_t new_id = get_next_id(*T, *nbtasks);
     
     char task_dir[512];
     snprintf(task_dir, sizeof(task_dir), "%s/%llu", base_path, (unsigned long long)new_id);
-    if (mkdir(task_dir, 0700) == -1) { 
-        perror("mkdir task"); 
-        return; 
-    }
+    mkdir(task_dir, 0700);
     
     uint64_t min = read_u64(fd_req);
     uint32_t hour = read_u32(fd_req);
@@ -324,155 +300,33 @@ void traiter_create(int fd_req, char *rep_path, char *base_path, tasks **T, uint
         write_u64(fd_rep, new_id);
         close(fd_rep);
     }
-    printf("[Erraid] Tache creee : ID %llu\n", (unsigned long long)new_id);
 }
 
-void traiter_create_seq(int fd_req, char *rep_path, char *base_path, tasks **T, uint64_t *nbtasks) {
-    printf("[Client] Demande de creation SEQUENCE (CS)\n");
+void traiter_combine(int fd_req, char *rep_path, char *base_path, tasks **T, uint64_t *nbtasks) {
+    printf("[Client] Combinaison (CB)\n");
+
+    read_u16(fd_req); 
 
     uint64_t min = read_u64(fd_req);
     uint32_t hour = read_u32(fd_req);
     uint8_t day;
     read_all(fd_req, &day, 1);
 
+    uint16_t type_comb = read_u16(fd_req);
     uint32_t count = read_u32(fd_req);
-    uint64_t *ids = malloc(count * sizeof(uint64_t));
-    for (uint32_t i = 0; i < count; i++) {
-        uint64_t tmp;
-        read_all(fd_req, &tmp, 8);
-        ids[i] = be64toh(tmp);
-    }
 
-    uint64_t new_id = get_next_id(*T, *nbtasks);
-    char task_dir[512];
-    snprintf(task_dir, sizeof(task_dir), "%s/%llu", base_path, (unsigned long long)new_id);
-    mkdir(task_dir, 0700);
-
-    char path_timing[512];
-    snprintf(path_timing, sizeof(path_timing), "%s/timing", task_dir);
-    int fd_time = open(path_timing, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    write_u64(fd_time, min);
-    write_u32(fd_time, hour);
-    write(fd_time, &day, 1);
-    close(fd_time);
-
-    char cmd_dir[512];
-    snprintf(cmd_dir, sizeof(cmd_dir), "%s/cmd", task_dir);
-    mkdir(cmd_dir, 0700);
-
-    char path_type[512];
-    snprintf(path_type, sizeof(path_type), "%s/type", cmd_dir);
-    int fd_type = open(path_type, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    write_u16(fd_type, TYPE_SEQ); 
-    close(fd_type);
-
-    for (uint32_t i = 0; i < count; i++) {
-        char src_cmd[512];
-        snprintf(src_cmd, sizeof(src_cmd), "%s/%llu/cmd", base_path, (unsigned long long)ids[i]);
-        
-        char dst_subdir[512];
-        snprintf(dst_subdir, sizeof(dst_subdir), "%s/%u", cmd_dir, i); 
-        
-        if (copy_recursive(src_cmd, dst_subdir) == -1) {
-            fprintf(stderr, "Erreur copie ou tache introuvable %llu\n", (unsigned long long)ids[i]);
+    if (type_comb == TYPE_IF && (count < 2 || count > 3)) {
+        fprintf(stderr, "Erreur IF: %d args\n", count);
+        for(uint32_t i=0; i<count; i++) {
+            uint64_t t;
+            read_all(fd_req, &t, 8);
         }
-    }
-
-    free(ids);
-
-    if (*T) free(*T);
-    *T = read_tasks(base_path);
-    *nbtasks = number_of_tasks(base_path);
-
-    int fd_rep = open(rep_path, O_WRONLY);
-    if (fd_rep != -1) {
-        write_u16(fd_rep, REP_OK);
-        write_u64(fd_rep, new_id);
-        close(fd_rep);
-    }
-    printf("[Erraid] Tache Sequence creee : ID %llu\n", (unsigned long long)new_id);
-}
-
-void traiter_create_pl(int fd_req, char *rep_path, char *base_path, tasks **T, uint64_t *nbtasks) {
-    printf("[Client] Demande de creation PIPELINE (CP)\n");
-
-    uint64_t min = read_u64(fd_req);
-    uint32_t hour = read_u32(fd_req);
-    uint8_t day;
-    read_all(fd_req, &day, 1);
-
-    uint32_t count = read_u32(fd_req);
-    uint64_t *ids = malloc(count * sizeof(uint64_t));
-    for (uint32_t i = 0; i < count; i++) {
-        uint64_t tmp;
-        read_all(fd_req, &tmp, 8);
-        ids[i] = be64toh(tmp);
-    }
-
-    uint64_t new_id = get_next_id(*T, *nbtasks);
-    char task_dir[512];
-    snprintf(task_dir, sizeof(task_dir), "%s/%llu", base_path, (unsigned long long)new_id);
-    mkdir(task_dir, 0700);
-
-    char path_timing[512];
-    snprintf(path_timing, sizeof(path_timing), "%s/timing", task_dir);
-    int fd_time = open(path_timing, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    write_u64(fd_time, min);
-    write_u32(fd_time, hour);
-    write(fd_time, &day, 1);
-    close(fd_time);
-
-    char cmd_dir[512];
-    snprintf(cmd_dir, sizeof(cmd_dir), "%s/cmd", task_dir);
-    mkdir(cmd_dir, 0700);
-
-    char path_type[512];
-    snprintf(path_type, sizeof(path_type), "%s/type", cmd_dir);
-    int fd_type = open(path_type, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    write_u16(fd_type, TYPE_PL); 
-    close(fd_type);
-
-    for (uint32_t i = 0; i < count; i++) {
-        char src_cmd[512];
-        snprintf(src_cmd, sizeof(src_cmd), "%s/%llu/cmd", base_path, (unsigned long long)ids[i]);
-        
-        char dst_subdir[512];
-        snprintf(dst_subdir, sizeof(dst_subdir), "%s/%u", cmd_dir, i); 
-        
-        if (copy_recursive(src_cmd, dst_subdir) == -1) {
-            fprintf(stderr, "Erreur copie ou tache introuvable %llu\n", (unsigned long long)ids[i]);
-        }
-    }
-
-    free(ids);
-
-    if (*T) free(*T);
-    *T = read_tasks(base_path);
-    *nbtasks = number_of_tasks(base_path);
-
-    int fd_rep = open(rep_path, O_WRONLY);
-    if (fd_rep != -1) {
-        write_u16(fd_rep, REP_OK);
-        write_u64(fd_rep, new_id);
-        close(fd_rep);
-    }
-    printf("[Erraid] Tache Pipeline creee : ID %llu\n", (unsigned long long)new_id);
-}
-
-void traiter_create_if(int fd_req, char *rep_path, char *base_path, tasks **T, uint64_t *nbtasks) {
-    printf("[Client] Demande de creation IF (CI)\n");
-
-    uint64_t min = read_u64(fd_req);
-    uint32_t hour = read_u32(fd_req);
-    uint8_t day;
-    read_all(fd_req, &day, 1);
-
-    uint32_t count = read_u32(fd_req);
-    if (count < 2 || count > 3) {
-        fprintf(stderr, "[Erraid] Erreur: IF requiert 2 ou 3 taches, recu: %u\n", count);
-        for(uint32_t i=0; i<count; i++) { uint64_t tmp; read_all(fd_req, &tmp, 8); }
         int fd_rep = open(rep_path, O_WRONLY);
-        if (fd_rep != -1) { write_u16(fd_rep, REP_ERR); close(fd_rep); }
+        if (fd_rep != -1) {
+            write_u16(fd_rep, REP_ERR);
+            write_u16(fd_rep, 0x4E46);
+            close(fd_rep);
+        }
         return;
     }
 
@@ -503,23 +357,24 @@ void traiter_create_if(int fd_req, char *rep_path, char *base_path, tasks **T, u
     char path_type[512];
     snprintf(path_type, sizeof(path_type), "%s/type", cmd_dir);
     int fd_type = open(path_type, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    write_u16(fd_type, TYPE_IF); 
+    write_u16(fd_type, type_comb); 
     close(fd_type);
 
     for (uint32_t i = 0; i < count; i++) {
         char src_cmd[512];
         snprintf(src_cmd, sizeof(src_cmd), "%s/%llu/cmd", base_path, (unsigned long long)ids[i]);
-        
         char dst_subdir[512];
         snprintf(dst_subdir, sizeof(dst_subdir), "%s/%u", cmd_dir, i); 
-        
-        if (copy_recursive(src_cmd, dst_subdir) == -1) {
-            fprintf(stderr, "Erreur copie ou tache introuvable %llu\n", (unsigned long long)ids[i]);
-        }
+        copy_recursive(src_cmd, dst_subdir);
+    }
+
+    for (uint32_t i = 0; i < count; i++) {
+        char old_dir[512];
+        snprintf(old_dir, sizeof(old_dir), "%s/%llu", base_path, (unsigned long long)ids[i]);
+        remove_directory(old_dir);
     }
 
     free(ids);
-
     if (*T) free(*T);
     *T = read_tasks(base_path);
     *nbtasks = number_of_tasks(base_path);
@@ -530,30 +385,24 @@ void traiter_create_if(int fd_req, char *rep_path, char *base_path, tasks **T, u
         write_u64(fd_rep, new_id);
         close(fd_rep);
     }
-    printf("[Erraid] Tache IF creee : ID %llu\n", (unsigned long long)new_id);
 }
 
 int main(int argc, char *argv[]) {
     char chemin_tasks[256], chemin_pipes[256];
     char *user = getenv("USER");
-
-    char *arg_r = NULL;
-    char *arg_p = NULL;
+    char *arg_r = NULL, *arg_p = NULL;
     int avantPlan = 0;
     int opt;
+
     while ((opt = getopt(argc, argv, "r:R:p:P:F")) != -1) {
         switch (opt) {
-        case 'r':
-        case 'R': arg_r = optarg; break;
-        case 'p':
-        case 'P': arg_p = optarg; break;
-        case 'F': avantPlan = 1; break;
-        case '?':
-            fprintf(stderr, "Usage: %s [-r RUN_DIRECTORY] [-P PIPES_DIR]\n", argv[0]);
-            exit(EXIT_FAILURE);
+            case 'r': case 'R': arg_r = optarg; break;
+            case 'p': case 'P': arg_p = optarg; break;
+            case 'F': avantPlan = 1; break;
+            default: exit(EXIT_FAILURE);
         }
     }
-
+    
     if (arg_r) snprintf(chemin_tasks, sizeof(chemin_tasks), "%s/tasks", arg_r);
     else if (user) snprintf(chemin_tasks, sizeof(chemin_tasks), "/tmp/%s/erraid/tasks", user);
     else strcpy(chemin_tasks, "/tmp/erraid/tasks");
@@ -562,9 +411,6 @@ int main(int argc, char *argv[]) {
     else if (arg_r) snprintf(chemin_pipes, sizeof(chemin_pipes), "%s/pipes", arg_r);
     else if (user) snprintf(chemin_pipes, sizeof(chemin_pipes), "/tmp/%s/erraid/pipes", user);
     else strcpy(chemin_pipes, "/tmp/erraid/pipes");
-
-    printf("Chemin tasks = %s\n", chemin_tasks);
-    printf("Chemin pipes = %s\n", chemin_pipes);
 
     snprintf(req, sizeof req, "%s/erraid-request-pipe", chemin_pipes);
     snprintf(rep, sizeof rep, "%s/erraid-reply-pipe", chemin_pipes);
@@ -576,179 +422,105 @@ int main(int argc, char *argv[]) {
     }
     struct stat st;
     if (stat(chemin_pipes, &st) == -1) mkdir(chemin_pipes, 0700);
-
-    if (mkfifo(req, 0622) == -1) {
-        if (errno != EEXIST) {
-            perror("mkfifo requete");
-            exit(EXIT_FAILURE);
-        }
-    }
-    if (mkfifo(rep, 0622) == -1) {
-        if (errno != EEXIST) {
-            perror("mkfifo reponse");
-            exit(EXIT_FAILURE);
-        }
-    }
+    mkfifo(req, 0622);
+    mkfifo(rep, 0622);
 
     if (!avantPlan) {
-        pid_t pid = fork();
-        if (pid < 0) {
-            perror("fork");
-            exit(1);
-        }
-        if (pid > 0) {
-            exit(0);
-        }
-
-        setsid();
-
         if (fork() > 0) exit(0);
-
-        close(STDIN_FILENO);
-        close(STDOUT_FILENO);
-        close(STDERR_FILENO);
+        setsid();
+        if (fork() > 0) exit(0);
+        close(0);
+        close(1);
+        close(2);
     }
 
-    struct sigaction sa_ign;
-    sa_ign.sa_handler = SIG_IGN;
-    sigemptyset(&sa_ign.sa_mask);
-    sa_ign.sa_flags = 0;
-    sigaction(SIGPIPE, &sa_ign, NULL);
+    struct sigaction sa;
+    sa.sa_handler = handler_timer;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGALRM, &sa, NULL);
 
-    struct sigaction sa_arret;
-    sa_arret.sa_handler = handler_arret;
-    sigemptyset(&sa_arret.sa_mask);
-    sa_arret.sa_flags = 0;
-    sigaction(SIGINT, &sa_arret, NULL);
-    sigaction(SIGTERM, &sa_arret, NULL);
+    struct sigaction sa_int;
+    sa_int.sa_handler = handler_arret;
+    sigemptyset(&sa_int.sa_mask);
+    sa_int.sa_flags = 0;
+    sigaction(SIGINT, &sa_int, NULL);
+    sigaction(SIGTERM, &sa_int, NULL);
 
     int fd_req = open(req, O_RDWR);
-    if (fd_req == -1) { perror("open req"); unlink(req); unlink(rep); return 1; }
-
-    uint64_t nbtasks = number_of_tasks(chemin_tasks);
-    printf("Nombre de tâches trouvées : %llu\n", (unsigned long long)nbtasks);
-
     tasks *T = read_tasks(chemin_tasks);
-
-    if (!T && nbtasks > 0) {
-        write(2, "Erreur lecture tasks\n", 21);
-        close(fd_req); unlink(req); unlink(rep);
-        return 1;
-    }
-
-    printf("Démon prêt.\n");
-    fflush(stdout);
-
-    struct pollfd fds[1];
-    fds[0].fd = fd_req;
-    fds[0].events = POLLIN;
-
-    time_t last_check = time(NULL);
-    struct tm tm_last;
-    localtime_r(&last_check, &tm_last);
-    int last_minute = tm_last.tm_min;
+    uint64_t nbtasks = number_of_tasks(chemin_tasks);
 
     while (running) {
-
         time_t now = time(NULL);
         struct tm tm_now;
         localtime_r(&now, &tm_now);
+        
+        int sec_to_wait = 60 - tm_now.tm_sec;
+        if (sec_to_wait <= 0) sec_to_wait = 1;
 
-        int timeout_ms;
-        if (tm_now.tm_min != last_minute) {
-            timeout_ms = 0;
-        } else {
-            int seconds_left = 60 - tm_now.tm_sec;
-            timeout_ms = seconds_left * 1000;
-        }
+        alarm(sec_to_wait);
 
-        int ret = poll(fds, 1, timeout_ms);
-        if (ret == -1) {
-            if (errno == EINTR) continue;
-            perror("poll");
+        uint16_t opcode_be;
+        ssize_t n = read(fd_req, &opcode_be, 2);
+
+        alarm(0); 
+
+        if (n == -1) {
+            if (errno == EINTR) {
+                if (timer_expired) {
+                    timer_expired = 0;
+                    time_t t2 = time(NULL);
+                    struct tm tm2;
+                    localtime_r(&t2, &tm2);
+                    
+                    for (uint64_t i = 0; i < nbtasks; i++) {
+                        if (should_run(&T[i], &tm2)) {
+                            if (fork() == 0) {
+                                if (fork() == 0) {
+                                    execute_task(&T[i]);
+                                    exit(0);
+                                }
+                                exit(0);
+                            }
+                            wait(NULL);
+                        }
+                    }
+                }
+                continue;
+            }
+            perror("read");
             break;
         }
 
-        now = time(NULL);
-        localtime_r(&now, &tm_now);
-        if (tm_now.tm_min != last_minute) {
-            printf("[Timer] Nouvelle minute\n");
-            for (uint64_t i = 0; i < nbtasks; i++) {
-                if (should_run(&T[i], &tm_now)) {
-                    pid_t pid = fork();
-                    if (pid == -1) {
-                        perror("fork");
-                        continue;
-                    }
-                    if (pid == 0) {
-                        close(fd_req);
-                        if (fork() == 0) { execute_task(&T[i]); exit(0); }
-                        exit(0);
-                    }
-                    int status;
-                    if (waitpid(pid, &status, 0) == -1) {
-                        perror("waitpid");
-                    }
-                }
-            }
-            last_minute = tm_now.tm_min;
+        if (n == 0) continue;
+
+        uint16_t opcode = be16toh(opcode_be);
+        if (opcode == LIST) lister_taches(rep, T, nbtasks);
+        else if (opcode == 0x4352) traiter_create(fd_req, rep, chemin_tasks, &T, &nbtasks);
+        else if (opcode == COMBINE) traiter_combine(fd_req, rep, chemin_tasks, &T, &nbtasks);
+        else if (opcode == 0x524D) traiter_remove(fd_req, rep, chemin_tasks, &T, &nbtasks);
+        else if (opcode == STDOUT) {
+             uint64_t tmp;
+             read_all(fd_req, &tmp, 8);
+             traiter_xoe(rep, chemin_tasks, be64toh(tmp), "stdout");
         }
-
-        if (ret > 0 && (fds[0].revents & POLLIN)) {
-            uint16_t opcode_be;
-            ssize_t n = read(fd_req, &opcode_be, 2);
-
-            if (n != 2) continue;
-            uint16_t opcode = be16toh(opcode_be);
-
-            if (opcode == LIST) {
-                printf("[Client] Reçu LS\n");
-                lister_taches(rep, T, nbtasks);
-            } 
-            else if (opcode == 0x4352) { 
-                traiter_create(fd_req, rep, chemin_tasks, &T, &nbtasks);
-            }
-            else if (opcode == CREATE_SEQ) {
-                traiter_create_seq(fd_req, rep, chemin_tasks, &T, &nbtasks);
-            }
-            else if (opcode == CREATE_PL) {
-                traiter_create_pl(fd_req, rep, chemin_tasks, &T, &nbtasks);
-            }
-            else if (opcode == CREATE_IF) { 
-                traiter_create_if(fd_req, rep, chemin_tasks, &T, &nbtasks);
-            }
-            else if (opcode == TIMES_EXITCODES) {
-                uint64_t id_be, id;
-                read(fd_req, &id_be, 8);
-                id = be64toh(id_be);
-
-                printf("[Client] Historique demandé pour ID %llu\n", (unsigned long long)id);
-                traiter_xoe(rep, chemin_tasks, id, "times-exitcodes");
-            } else if (opcode == STDOUT) {
-                uint64_t id_be, id;
-                read(fd_req, &id_be, 8);
-                id = be64toh(id_be);
-
-                printf("[Client] Stdout demandé pour ID %llu\n", (unsigned long long)id);
-                traiter_xoe(rep, chemin_tasks, id, "stdout");
-            } else if (opcode == STDERR) {
-                uint64_t id_be, id;
-                read(fd_req, &id_be, 8);
-                id = be64toh(id_be);
-
-                printf("[Client] Stderr demandé pour ID %llu\n", (unsigned long long)id);
-                traiter_xoe(rep, chemin_tasks, id, "stderr");
-            } else if (opcode == 0x524D) {
-                traiter_remove(fd_req, rep, chemin_tasks, &T, &nbtasks);
-            } else if (opcode == TERM) {
-                printf("[Client] Requête de terminaison reçue.\n");
-                int fd_rep = open(rep, O_WRONLY);
-                if (fd_rep == -1) perror("fd_rep"); 
-                else {
-                    write_u16(fd_rep, REP_OK);
-                    close(fd_rep);
-                }
-                running = 0;
+        else if (opcode == STDERR) {
+             uint64_t tmp;
+             read_all(fd_req, &tmp, 8);
+             traiter_xoe(rep, chemin_tasks, be64toh(tmp), "stderr");
+        }
+        else if (opcode == TIMES_EXITCODES) {
+             uint64_t tmp;
+             read_all(fd_req, &tmp, 8);
+             traiter_xoe(rep, chemin_tasks, be64toh(tmp), "times-exitcodes");
+        }
+        else if (opcode == TERM) {
+            running = 0;
+            int f = open(rep, O_WRONLY);
+            if(f != -1) {
+                write_u16(f, REP_OK);
+                close(f);
             }
         }
     }
@@ -756,6 +528,6 @@ int main(int argc, char *argv[]) {
     close(fd_req);
     unlink(req);
     unlink(rep);
-    free(T);
+    if(T) free(T);
     return 0;
 }

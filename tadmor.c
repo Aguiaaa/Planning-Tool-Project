@@ -58,9 +58,8 @@ void print_timing(uint64_t val, int max) {
     if (first) printf("-");
 }
 
-void print_cmd_recursive(int fd, int is_root) {
+uint16_t print_cmd_recursive(int fd) {
     uint16_t type = read_u16(fd);
-
     if (type == TYPE_SIMPLE) {
         uint32_t argc = read_u32(fd);
         for (uint32_t i = 0; i < argc; i++) {
@@ -71,38 +70,48 @@ void print_cmd_recursive(int fd, int is_root) {
             printf("%s", buf);
             if (i < argc - 1) printf(" ");
         }
-    } else if (type == TYPE_SEQ || type == TYPE_PL) {
+    } 
+    else if (type == TYPE_SEQ || type == TYPE_PL) {
         uint32_t ncmds = read_u32(fd);
         char *sep = (type == TYPE_SEQ) ? " ; " : " | ";
 
-        if (!is_root) printf("(");
+        printf("("); 
+    
         for (uint32_t i = 0; i < ncmds; i++) {
-            print_cmd_recursive(fd, 0);
-            if (i < ncmds - 1) printf("%s", sep);
+            if (i > 0) printf("%s", sep);
+            else printf(" "); 
+            
+            print_cmd_recursive(fd);
         }
-        if (!is_root) printf(")");
-    } else if (type == TYPE_IF) {
+        printf(" )"); 
+    } 
+    else if (type == TYPE_IF) {
         uint32_t ncmds = read_u32(fd);
-        if (!is_root) printf("(");
+        printf("( if "); 
 
-        printf("if ");
-        print_cmd_recursive(fd, 0);
-        printf(" ; then ");
+        uint16_t t_cond = print_cmd_recursive(fd);
+        
+        if (t_cond == TYPE_SIMPLE) printf(" ; then ");
+        else printf(" then ");
 
-        print_cmd_recursive(fd, 0);
+        uint16_t t_then = print_cmd_recursive(fd);
 
         if (ncmds == 3) {
-            printf(" else ");
-            print_cmd_recursive(fd, 0);
+            if (t_then == TYPE_SIMPLE) printf(" ; else ");
+            else printf(" else ");
+            uint16_t t_else = print_cmd_recursive(fd);
+            if (t_else == TYPE_SIMPLE) printf(" ; fi )");
+            else printf(" fi )");
+        } else {
+            if (t_then == TYPE_SIMPLE) printf(" ; fi )");
+            else printf(" fi )");
         }
-
-        printf(" fi");
-        if (!is_root) printf(")");
     }
+    return type; 
 }
 
 void print_cmd(int fd) {
-    print_cmd_recursive(fd, 1);
+    print_cmd_recursive(fd);
 }
 
 int main(int argc, char *argv[]) {
@@ -365,14 +374,11 @@ int main(int argc, char *argv[]) {
     if (create_mode) {
         snprintf(req, sizeof(req), "%s/erraid-request-pipe", chemin_pipes);
         snprintf(rep, sizeof(rep), "%s/erraid-reply-pipe", chemin_pipes);
-
         if (optind >= argc) {
             fprintf(stderr, "Usage: %s -c [-m min] [-H hour] [-d day] <cmd> [args...]\n", argv[0]);
             exit(EXIT_FAILURE);
         }
-
         int cmd_argc = argc - optind;
-
         fd_req = open(req, O_WRONLY);
         if (fd_req == -1) { perror("open req"); exit(1); }
 
@@ -405,108 +411,18 @@ int main(int argc, char *argv[]) {
         close(fd_rep);
     }
 
-    if (seq_mode) {
+   if (seq_mode || pipe_mode || if_mode) {
         snprintf(req, sizeof(req), "%s/erraid-request-pipe", chemin_pipes);
         snprintf(rep, sizeof(rep), "%s/erraid-reply-pipe", chemin_pipes);
 
         if (optind >= argc) {
-            fprintf(stderr, "Usage: %s -s [timing] <ID_1> <ID_2> ...\n", argv[0]);
+            fprintf(stderr, "Erreur: Identifiants de taches manquants.\n");
             exit(EXIT_FAILURE);
         }
-
         int count = argc - optind;
-        uint64_t *ids = malloc(count * sizeof(uint64_t));
-        for (int i = 0; i < count; i++) {
-            ids[i] = strtoull(argv[optind + i], NULL, 10);
-        }
-
-        fd_req = open(req, O_WRONLY);
-        if (fd_req == -1) { perror("open req"); exit(1); }
-
-        write_u16(fd_req, CREATE_SEQ); 
-        write_u64(fd_req, min);
-        write_u32(fd_req, hour);
-        write(fd_req, &day, 1);
-
-        write_u32(fd_req, count);
-        for (int i = 0; i < count; i++) {
-            write_u64(fd_req, ids[i]);
-        }
         
-        free(ids);
-        close(fd_req);
-
-        fd_rep = open(rep, O_RDONLY);
-        if (fd_rep == -1) { perror("open rep"); exit(1); }
-
-        uint16_t status = read_u16(fd_rep);
-        if (status == 0x4F4B) { 
-            uint64_t new_id = read_u64(fd_rep);
-            printf("Tache Séquence créée avec succès. ID: %llu\n", (unsigned long long)new_id);
-        } else {
-            fprintf(stderr, "Erreur création séquence (Code 0x%x)\n", status);
-        }
-        close(fd_rep);
-        exit(0);
-    }
-
-    if (pipe_mode) {
-        snprintf(req, sizeof(req), "%s/erraid-request-pipe", chemin_pipes);
-        snprintf(rep, sizeof(rep), "%s/erraid-reply-pipe", chemin_pipes);
-
-        if (optind >= argc) {
-            fprintf(stderr, "Usage: %s -p [timing] <ID_1> <ID_2> ...\n", argv[0]);
-            exit(EXIT_FAILURE);
-        }
-
-        int count = argc - optind;
-        uint64_t *ids = malloc(count * sizeof(uint64_t));
-        for (int i = 0; i < count; i++) {
-            ids[i] = strtoull(argv[optind + i], NULL, 10);
-        }
-
-        fd_req = open(req, O_WRONLY);
-        if (fd_req == -1) { perror("open req"); exit(1); }
-
-        write_u16(fd_req, CREATE_PL); 
-        write_u64(fd_req, min);
-        write_u32(fd_req, hour);
-        write(fd_req, &day, 1);
-
-        write_u32(fd_req, count);
-        for (int i = 0; i < count; i++) {
-            write_u64(fd_req, ids[i]);
-        }
-        
-        free(ids);
-        close(fd_req);
-
-        fd_rep = open(rep, O_RDONLY);
-        if (fd_rep == -1) { perror("open rep"); exit(1); }
-
-        uint16_t status = read_u16(fd_rep);
-        if (status == 0x4F4B) { 
-            uint64_t new_id = read_u64(fd_rep);
-            printf("Tache Pipeline créée avec succès. ID: %llu\n", (unsigned long long)new_id);
-        } else {
-            fprintf(stderr, "Erreur création pipeline (Code 0x%x)\n", status);
-        }
-        close(fd_rep);
-        exit(0);
-    }
-
-    if (if_mode) {
-        snprintf(req, sizeof(req), "%s/erraid-request-pipe", chemin_pipes);
-        snprintf(rep, sizeof(rep), "%s/erraid-reply-pipe", chemin_pipes);
-
-        if (optind >= argc) {
-            fprintf(stderr, "Usage: %s -i [timing] <ID_1> <ID_2> [ID_3]\n", argv[0]);
-            exit(EXIT_FAILURE);
-        }
-
-        int count = argc - optind;
-        if (count < 2 || count > 3) {
-            fprintf(stderr, "Erreur: IF requiert 2 ou 3 taches, %d fournies.\n", count);
+        if (if_mode && (count < 2 || count > 3)) {
+            fprintf(stderr, "Erreur: IF requiert 2 ou 3 taches.\n");
             exit(EXIT_FAILURE);
         }
 
@@ -514,32 +430,38 @@ int main(int argc, char *argv[]) {
         for (int i = 0; i < count; i++) {
             ids[i] = strtoull(argv[optind + i], NULL, 10);
         }
-
         fd_req = open(req, O_WRONLY);
         if (fd_req == -1) { perror("open req"); exit(1); }
 
-        write_u16(fd_req, CREATE_IF); 
+        write_u16(fd_req, COMBINE); 
+
+        write_u16(fd_req, 0); 
+
         write_u64(fd_req, min);
         write_u32(fd_req, hour);
         write(fd_req, &day, 1);
 
+        uint16_t type_to_send = 0;
+        if (seq_mode) type_to_send = TYPE_SEQ;
+        else if (pipe_mode) type_to_send = TYPE_PL;
+        else if (if_mode) type_to_send = TYPE_IF;
+        write_u16(fd_req, type_to_send);
         write_u32(fd_req, count);
         for (int i = 0; i < count; i++) {
             write_u64(fd_req, ids[i]);
         }
-        
         free(ids);
         close(fd_req);
-
         fd_rep = open(rep, O_RDONLY);
         if (fd_rep == -1) { perror("open rep"); exit(1); }
 
         uint16_t status = read_u16(fd_rep);
-        if (status == 0x4F4B) { 
+        if (status == 0x4F4B) {
             uint64_t new_id = read_u64(fd_rep);
-            printf("Tache IF créée avec succès. ID: %llu\n", (unsigned long long)new_id);
+            printf("%llu\n", (unsigned long long)new_id); 
         } else {
-            fprintf(stderr, "Erreur création IF (Code 0x%x)\n", status);
+            uint16_t err = read_u16(fd_rep);
+            fprintf(stderr, "Erreur combinaison (Code 0x%x)\n", err);
         }
         close(fd_rep);
         exit(0);
