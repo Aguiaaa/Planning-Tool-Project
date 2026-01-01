@@ -58,7 +58,7 @@ void print_timing(uint64_t val, int max) {
     if (first) printf("-");
 }
 
-uint16_t print_cmd_recursive(int fd) {
+uint16_t print_cmd_recursive(int fd, int is_root) {
     uint16_t type = read_u16(fd);
     if (type == TYPE_SIMPLE) {
         uint32_t argc = read_u32(fd);
@@ -75,31 +75,31 @@ uint16_t print_cmd_recursive(int fd) {
         uint32_t ncmds = read_u32(fd);
         char *sep = (type == TYPE_SEQ) ? " ; " : " | ";
 
-        printf("("); 
+        if (!is_root) printf("("); 
     
         for (uint32_t i = 0; i < ncmds; i++) {
             if (i > 0) printf("%s", sep);
-            else printf(" "); 
-            
-            print_cmd_recursive(fd);
+            else if (!is_root) printf(" "); 
+
+            print_cmd_recursive(fd, 0);
         }
-        printf(" )"); 
+        if (!is_root) printf(" )"); 
     } 
     else if (type == TYPE_IF) {
         uint32_t ncmds = read_u32(fd);
         printf("( if "); 
 
-        uint16_t t_cond = print_cmd_recursive(fd);
+        uint16_t t_cond = print_cmd_recursive(fd, 0);
         
         if (t_cond == TYPE_SIMPLE) printf(" ; then ");
         else printf(" then ");
 
-        uint16_t t_then = print_cmd_recursive(fd);
+        uint16_t t_then = print_cmd_recursive(fd, 0);
 
         if (ncmds == 3) {
             if (t_then == TYPE_SIMPLE) printf(" ; else ");
             else printf(" else ");
-            uint16_t t_else = print_cmd_recursive(fd);
+            uint16_t t_else = print_cmd_recursive(fd, 0);
             if (t_else == TYPE_SIMPLE) printf(" ; fi )");
             else printf(" fi )");
         } else {
@@ -111,7 +111,7 @@ uint16_t print_cmd_recursive(int fd) {
 }
 
 void print_cmd(int fd) {
-    print_cmd_recursive(fd);
+    print_cmd_recursive(fd, 1);
 }
 
 int main(int argc, char *argv[]) {

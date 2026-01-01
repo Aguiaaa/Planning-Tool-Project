@@ -181,8 +181,8 @@ void traiter_xoe(char *rep_path, char *base_path, uint64_t id, char *filename) {
         char dir_path[512];
         snprintf(dir_path, sizeof(dir_path), "%s/%llu", base_path, (unsigned long long)id);
         struct stat st_task;
-        if (stat(dir_path, &st_task) == -1) write_u16(fd_rep, 0x4E46);
-        else write_u16(fd_rep, 0x4E52);
+        if (stat(dir_path, &st_task) == -1) write_u16(fd_rep, 0x4E46); // NF
+        else write_u16(fd_rep, 0x4E52); // NR
         close(fd_rep);
         return;
     }
@@ -191,7 +191,11 @@ void traiter_xoe(char *rep_path, char *base_path, uint64_t id, char *filename) {
     struct stat st;
     fstat(fd_file, &st);
     
-    write_u32(fd_rep, (uint32_t)st.st_size);
+    if (strcmp(filename, "times-exitcodes") == 0) {
+        write_u32(fd_rep, (uint32_t)(st.st_size / 10));
+    } else {
+        write_u32(fd_rep, (uint32_t)st.st_size);
+    }
 
     char buf[1024];
     ssize_t n;
