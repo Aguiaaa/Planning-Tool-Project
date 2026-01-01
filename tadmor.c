@@ -6,6 +6,7 @@
 #include "protocole.h"
 
 extern char *optarg;
+extern int optind; 
 
 uint64_t parse_timing(char *str, int max_val) {
     uint64_t mask = 0;
@@ -113,16 +114,27 @@ int main(int argc, char *argv[]) {
 
     int opt, fd_req, fd_rep;
     int create_mode = 0;
+    int seq_mode = 0; 
+    int pipe_mode = 0;
+    int if_mode = 0; 
+    int abstract_mode = 0;
     
     uint64_t min = (1ULL << 60) - 1; 
     uint32_t hour = (1U << 24) - 1;  
     uint8_t day = 0x7F; 
 
-    while ((opt = getopt(argc, argv, "lP:p:x:o:e:qr:cm:H:d:")) != -1) {
+    while ((opt = getopt(argc, argv, "+lP:x:o:e:qr:cm:H:d:snpi")) != -1) {
         switch (opt) {
-        case 'p': 
         case 'P':
             snprintf(chemin_pipes, sizeof(chemin_pipes), "%s", optarg);
+            break;
+
+        case 'p':
+            pipe_mode = 1;
+            break;
+
+        case 'i': 
+            if_mode = 1;
             break;
 
         case 'l':
@@ -170,6 +182,14 @@ int main(int argc, char *argv[]) {
 
         case 'c':
             create_mode = 1;
+            break;
+
+        case 's': 
+            seq_mode = 1;
+            break;
+
+        case 'n':  
+            abstract_mode = 1;
             break;
 
         case 'm':
@@ -245,7 +265,7 @@ int main(int argc, char *argv[]) {
                     total_lu += n;
                 }
             } else {
-                fprintf(stderr, "Erreur : Tache inconnue ou fichier vide.\n");
+                fprintf(stderr, "Erreur : Tache inconnue ou Tache non executer.\n");
                 exit(1);
             }
             close(fd_rep);
@@ -331,9 +351,15 @@ int main(int argc, char *argv[]) {
         }
 
         case '?':
-            fprintf(stderr, "Usage: %s [-P PIPES_DIR] [-l] [-x id] [-o id] [-e id] [-r id] [-c [-m min] [-H hour] [-d day] cmd ...]\n", argv[0]);
+            fprintf(stderr, "Usage: %s [-P PIPES_DIR] [-l] [-x id] ... [-c ...] [-s ...] [-p ...] [-i ...]\n", argv[0]);
             exit(EXIT_FAILURE);
         }
+    }
+
+    if (abstract_mode) {
+        min = 0;
+        hour = 0;
+        day = 0;
     }
 
     if (create_mode) {
@@ -377,6 +403,146 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Erreur lors de la creation (Code 0x%x)\n", status);
         }
         close(fd_rep);
+    }
+
+    if (seq_mode) {
+        snprintf(req, sizeof(req), "%s/erraid-request-pipe", chemin_pipes);
+        snprintf(rep, sizeof(rep), "%s/erraid-reply-pipe", chemin_pipes);
+
+        if (optind >= argc) {
+            fprintf(stderr, "Usage: %s -s [timing] <ID_1> <ID_2> ...\n", argv[0]);
+            exit(EXIT_FAILURE);
+        }
+
+        int count = argc - optind;
+        uint64_t *ids = malloc(count * sizeof(uint64_t));
+        for (int i = 0; i < count; i++) {
+            ids[i] = strtoull(argv[optind + i], NULL, 10);
+        }
+
+        fd_req = open(req, O_WRONLY);
+        if (fd_req == -1) { perror("open req"); exit(1); }
+
+        write_u16(fd_req, CREATE_SEQ); 
+        write_u64(fd_req, min);
+        write_u32(fd_req, hour);
+        write(fd_req, &day, 1);
+
+        write_u32(fd_req, count);
+        for (int i = 0; i < count; i++) {
+            write_u64(fd_req, ids[i]);
+        }
+        
+        free(ids);
+        close(fd_req);
+
+        fd_rep = open(rep, O_RDONLY);
+        if (fd_rep == -1) { perror("open rep"); exit(1); }
+
+        uint16_t status = read_u16(fd_rep);
+        if (status == 0x4F4B) { 
+            uint64_t new_id = read_u64(fd_rep);
+            printf("Tache Séquence créée avec succès. ID: %llu\n", (unsigned long long)new_id);
+        } else {
+            fprintf(stderr, "Erreur création séquence (Code 0x%x)\n", status);
+        }
+        close(fd_rep);
+        exit(0);
+    }
+
+    if (pipe_mode) {
+        snprintf(req, sizeof(req), "%s/erraid-request-pipe", chemin_pipes);
+        snprintf(rep, sizeof(rep), "%s/erraid-reply-pipe", chemin_pipes);
+
+        if (optind >= argc) {
+            fprintf(stderr, "Usage: %s -p [timing] <ID_1> <ID_2> ...\n", argv[0]);
+            exit(EXIT_FAILURE);
+        }
+
+        int count = argc - optind;
+        uint64_t *ids = malloc(count * sizeof(uint64_t));
+        for (int i = 0; i < count; i++) {
+            ids[i] = strtoull(argv[optind + i], NULL, 10);
+        }
+
+        fd_req = open(req, O_WRONLY);
+        if (fd_req == -1) { perror("open req"); exit(1); }
+
+        write_u16(fd_req, CREATE_PL); 
+        write_u64(fd_req, min);
+        write_u32(fd_req, hour);
+        write(fd_req, &day, 1);
+
+        write_u32(fd_req, count);
+        for (int i = 0; i < count; i++) {
+            write_u64(fd_req, ids[i]);
+        }
+        
+        free(ids);
+        close(fd_req);
+
+        fd_rep = open(rep, O_RDONLY);
+        if (fd_rep == -1) { perror("open rep"); exit(1); }
+
+        uint16_t status = read_u16(fd_rep);
+        if (status == 0x4F4B) { 
+            uint64_t new_id = read_u64(fd_rep);
+            printf("Tache Pipeline créée avec succès. ID: %llu\n", (unsigned long long)new_id);
+        } else {
+            fprintf(stderr, "Erreur création pipeline (Code 0x%x)\n", status);
+        }
+        close(fd_rep);
+        exit(0);
+    }
+
+    if (if_mode) {
+        snprintf(req, sizeof(req), "%s/erraid-request-pipe", chemin_pipes);
+        snprintf(rep, sizeof(rep), "%s/erraid-reply-pipe", chemin_pipes);
+
+        if (optind >= argc) {
+            fprintf(stderr, "Usage: %s -i [timing] <ID_1> <ID_2> [ID_3]\n", argv[0]);
+            exit(EXIT_FAILURE);
+        }
+
+        int count = argc - optind;
+        if (count < 2 || count > 3) {
+            fprintf(stderr, "Erreur: IF requiert 2 ou 3 taches, %d fournies.\n", count);
+            exit(EXIT_FAILURE);
+        }
+
+        uint64_t *ids = malloc(count * sizeof(uint64_t));
+        for (int i = 0; i < count; i++) {
+            ids[i] = strtoull(argv[optind + i], NULL, 10);
+        }
+
+        fd_req = open(req, O_WRONLY);
+        if (fd_req == -1) { perror("open req"); exit(1); }
+
+        write_u16(fd_req, CREATE_IF); 
+        write_u64(fd_req, min);
+        write_u32(fd_req, hour);
+        write(fd_req, &day, 1);
+
+        write_u32(fd_req, count);
+        for (int i = 0; i < count; i++) {
+            write_u64(fd_req, ids[i]);
+        }
+        
+        free(ids);
+        close(fd_req);
+
+        fd_rep = open(rep, O_RDONLY);
+        if (fd_rep == -1) { perror("open rep"); exit(1); }
+
+        uint16_t status = read_u16(fd_rep);
+        if (status == 0x4F4B) { 
+            uint64_t new_id = read_u64(fd_rep);
+            printf("Tache IF créée avec succès. ID: %llu\n", (unsigned long long)new_id);
+        } else {
+            fprintf(stderr, "Erreur création IF (Code 0x%x)\n", status);
+        }
+        close(fd_rep);
+        exit(0);
     }
 
     return 0;
