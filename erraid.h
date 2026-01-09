@@ -23,10 +23,10 @@
 
 
 
-#define TYPE_SIMPLE  0x5349 // 'SI'
-#define TYPE_SEQ     0x5351 // 'SQ'
-#define TYPE_PL 0x504C // 'PL'
-#define TYPE_IF 0x4946 // 'IF'
+#define TYPE_SIMPLE  0x5349 
+#define TYPE_SEQ     0x5351 
+#define TYPE_PL 0x504C 
+#define TYPE_IF 0x4946 
 
 
 typedef struct {

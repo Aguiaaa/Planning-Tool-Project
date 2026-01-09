@@ -185,3 +185,41 @@ tasks *  read_tasks (char * chemin) {
 
 
 }
+
+
+void free_cmd_recursive(command *cmd) {
+    if (!cmd) return;
+    
+    if (cmd->type == TYPE_SIMPLE) {
+        if (cmd->args.ARGV) {
+            for (uint32_t i = 0; i < cmd->args.ARGC; i++) {
+                if (cmd->args.ARGV[i].DATA) {
+                    free(cmd->args.ARGV[i].DATA);
+                }
+            }
+            free(cmd->args.ARGV);
+        }
+    } else {
+        if (cmd->combinaison.sous_command) {
+            for (uint32_t i = 0; i < cmd->combinaison.ncmds; i++) {
+                free_cmd_recursive(&cmd->combinaison.sous_command[i]);
+            }
+            free(cmd->combinaison.sous_command);
+        }
+    }
+}
+
+void free_tasks(tasks *T, uint64_t count) {
+    if (!T) return;
+    
+    for (uint64_t i = 0; i < count; i++) {
+        if (T[i].chemin.DATA) {
+            free(T[i].chemin.DATA);
+        }
+        if (T[i].commandes) {
+            free_cmd_recursive(T[i].commandes);
+            free(T[i].commandes);
+        }
+    }
+    free(T);
+}

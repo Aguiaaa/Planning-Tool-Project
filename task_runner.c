@@ -49,7 +49,9 @@ int run(tasks *T, command *cmd) {
             exit(127);
         }
         int status;
-        if (waitpid(pid, &status, 0) == -1) return -1;
+        while (waitpid(pid, &status, 0) == -1) {
+            if (errno != EINTR) return -1;
+        }
         if (WIFEXITED(status)) return WEXITSTATUS(status);
         return -1;
     } else if (cmd->type == TYPE_SEQ) {

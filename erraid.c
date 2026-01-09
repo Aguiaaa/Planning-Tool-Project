@@ -294,7 +294,7 @@ void traiter_create(int fd_req, char *rep_path, char *base_path, tasks **T, uint
     snprintf(path_cmd, sizeof(path_cmd), "%s/cmd", task_dir);
     save_cmd_recursive(fd_req, path_cmd);
 
-    if (*T) free(*T);
+    if (*T) free_tasks(*T, *nbtasks);
     *T = read_tasks(base_path);
     *nbtasks = number_of_tasks(base_path);
 
@@ -379,7 +379,7 @@ void traiter_combine(int fd_req, char *rep_path, char *base_path, tasks **T, uin
     }
 
     free(ids);
-    if (*T) free(*T);
+    if (*T) free_tasks(*T, *nbtasks);
     *T = read_tasks(base_path);
     *nbtasks = number_of_tasks(base_path);
 
@@ -433,9 +433,13 @@ int main(int argc, char *argv[]) {
         if (fork() > 0) exit(0);
         setsid();
         if (fork() > 0) exit(0);
-        close(0);
-        close(1);
-        close(2);
+        int fd_null = open("/dev/null", O_RDWR);
+        if (fd_null != -1) {
+            dup2(fd_null, STDIN_FILENO);
+            dup2(fd_null, STDOUT_FILENO);
+            dup2(fd_null, STDERR_FILENO);
+            if (fd_null > 2) close(fd_null);
+        }
     }
 
     struct sigaction sa;
@@ -532,6 +536,6 @@ int main(int argc, char *argv[]) {
     close(fd_req);
     unlink(req);
     unlink(rep);
-    if(T) free(T);
+    if(T) free_tasks(T, nbtasks);
     return 0;
 }
