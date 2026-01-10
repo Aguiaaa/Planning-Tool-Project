@@ -26,7 +26,7 @@ void handler_timer(int sig) {
     timer_expired = 1;
 }
 
-int copy_file(const char *src, const char *dst) {
+int cp_file(const char *src, const char *dst) {
     int f1 = open(src, O_RDONLY);
     if (f1 == -1) return -1;
     
@@ -72,7 +72,7 @@ int copy_recursive(const char *src, const char *dst) {
             if (S_ISDIR(st.st_mode)) {
                 copy_recursive(p_src, p_dst);
             } else if (S_ISREG(st.st_mode)) {
-                copy_file(p_src, p_dst);
+                cp_file(p_src, p_dst);
             }
         }
     }
@@ -80,7 +80,7 @@ int copy_recursive(const char *src, const char *dst) {
     return 0;
 }
 
-int remove_directory(const char *path) {
+int rm_dir(const char *path) {
     DIR *d = opendir(path);
     size_t path_len = strlen(path);
     int r = -1;
@@ -102,7 +102,7 @@ int remove_directory(const char *path) {
                 struct stat statbuf;
                 snprintf(buf, len, "%s/%s", path, p->d_name);
                 if (!stat(buf, &statbuf)) {
-                    if (S_ISDIR(statbuf.st_mode)) r2 = remove_directory(buf);
+                    if (S_ISDIR(statbuf.st_mode)) r2 = rm_dir(buf);
                     else r2 = unlink(buf);
                 }
                 free(buf);
@@ -117,15 +117,15 @@ int remove_directory(const char *path) {
 }
 
 void write_cmd_recursive(int fd, command *cmd) {
-    write_u16(fd, cmd->type);
+    write_16(fd, cmd->type);
     if (cmd->type == TYPE_SIMPLE) {
-        write_u32(fd, cmd->args.ARGC);
+        write_32(fd, cmd->args.ARGC);
         for (uint32_t i = 0; i < cmd->args.ARGC; i++) {
-            write_u32(fd, cmd->args.ARGV[i].LENGTH);
+            write_32(fd, cmd->args.ARGV[i].LENGTH);
             write(fd, cmd->args.ARGV[i].DATA, cmd->args.ARGV[i].LENGTH);
         }
     } else {
-        write_u32(fd, cmd->combinaison.ncmds);
+        write_32(fd, cmd->combinaison.ncmds);
         for (uint32_t i = 0; i < cmd->combinaison.ncmds; i++) {
             write_cmd_recursive(fd, &cmd->combinaison.sous_command[i]);
         }
@@ -137,7 +137,7 @@ void traiter_remove(int fd_req, char *rep_path, char *base_path, tasks **T, uint
     if (read_all(fd_req, &id_be, 8) < 0) return;
     id = be64toh(id_be);
 
-    printf("[Client] Suppression ID %llu\n", (unsigned long long)id);
+    printf("Suppression ID %llu\n", (unsigned long long)id);
 
     int index = -1;
     for (uint64_t i = 0; i < *nbtasks; i++) {
@@ -151,19 +151,19 @@ void traiter_remove(int fd_req, char *rep_path, char *base_path, tasks **T, uint
     if (fd_rep == -1) return;
 
     if (index == -1) {
-        write_u16(fd_rep, REP_ERR);
-        write_u16(fd_rep, 0x4E46);
+        write_16(fd_rep, REP_ERR);
+        write_16(fd_rep, 0x4E46);
     } else {
         char dir_path[512];
         snprintf(dir_path, sizeof(dir_path), "%s/%llu", base_path, (unsigned long long)id);
-        remove_directory(dir_path);
+        rm_dir(dir_path);
 
         if (index != *nbtasks - 1) {
             (*T)[index] = (*T)[*nbtasks - 1];
         }
         (*nbtasks)--;
 
-        write_u16(fd_rep, REP_OK);
+        write_16(fd_rep, REP_OK);
     }
     close(fd_rep);
 }
@@ -177,24 +177,24 @@ void traiter_xoe(char *rep_path, char *base_path, uint64_t id, char *filename) {
 
     int fd_file = open(file_path, O_RDONLY);
     if (fd_file == -1) {
-        write_u16(fd_rep, REP_ERR);
+        write_16(fd_rep, REP_ERR);
         char dir_path[512];
         snprintf(dir_path, sizeof(dir_path), "%s/%llu", base_path, (unsigned long long)id);
         struct stat st_task;
-        if (stat(dir_path, &st_task) == -1) write_u16(fd_rep, 0x4E46); // NF
-        else write_u16(fd_rep, 0x4E52); // NR
+        if (stat(dir_path, &st_task) == -1) write_16(fd_rep, 0x4E46); 
+        else write_16(fd_rep, 0x4E52); 
         close(fd_rep);
         return;
     }
 
-    write_u16(fd_rep, REP_OK);
+    write_16(fd_rep, REP_OK);
     struct stat st;
     fstat(fd_file, &st);
     
     if (strcmp(filename, "times-exitcodes") == 0) {
-        write_u32(fd_rep, (uint32_t)(st.st_size / 10));
+        write_32(fd_rep, (uint32_t)(st.st_size / 10));
     } else {
-        write_u32(fd_rep, (uint32_t)st.st_size);
+        write_32(fd_rep, (uint32_t)st.st_size);
     }
 
     char buf[1024];
@@ -211,13 +211,13 @@ void lister_taches(char *rep_path, tasks *T, uint64_t nbtasks) {
     int fd_rep = open(rep_path, O_WRONLY);
     if (fd_rep == -1) return;
 
-    write_u16(fd_rep, REP_OK);
-    write_u32(fd_rep, (uint32_t)nbtasks);
+    write_16(fd_rep, REP_OK);
+    write_32(fd_rep, (uint32_t)nbtasks);
 
     for (uint64_t i = 0; i < nbtasks; i++) {
-        write_u64(fd_rep, T[i].ID);
-        write_u64(fd_rep, T[i].tm.MINUTES);
-        write_u32(fd_rep, T[i].tm.HOURS);
+        write_64(fd_rep, T[i].ID);
+        write_64(fd_rep, T[i].tm.MINUTES);
+        write_32(fd_rep, T[i].tm.HOURS);
         write(fd_rep, &T[i].tm.DAYSOFWEEK, 1);
         write_cmd_recursive(fd_rep, T[i].commandes);
     }
@@ -236,22 +236,22 @@ uint64_t get_next_id(tasks *T, uint64_t nbtasks) {
 int save_cmd_recursive(int fd_req, char *dir_path) {
     if (mkdir(dir_path, 0700) == -1 && errno != EEXIST) return -1;
 
-    uint16_t type_be = read_u16(fd_req); 
+    uint16_t type_be = read_16(fd_req); 
     char path_type[512];
     snprintf(path_type, sizeof(path_type), "%s/type", dir_path);
     int fd_type = open(path_type, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    write_u16(fd_type, type_be); 
+    write_16(fd_type, type_be); 
     close(fd_type);
 
     if (type_be == TYPE_SIMPLE) {
-        uint32_t argc = read_u32(fd_req);
+        uint32_t argc = read_32(fd_req);
         char path_argv[512];
         snprintf(path_argv, sizeof(path_argv), "%s/argv", dir_path);
         int fd_argv = open(path_argv, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-        write_u32(fd_argv, argc); 
+        write_32(fd_argv, argc); 
         for (uint32_t i = 0; i < argc; i++) {
-            uint32_t len = read_u32(fd_req);
-            write_u32(fd_argv, len);         
+            uint32_t len = read_32(fd_req);
+            write_32(fd_argv, len);         
             char *buf = malloc(len + 1);
             read_all(fd_req, buf, len);     
             write(fd_argv, buf, len);       
@@ -259,7 +259,7 @@ int save_cmd_recursive(int fd_req, char *dir_path) {
         }
         close(fd_argv);
     } else {
-        uint32_t ncmds = read_u32(fd_req);
+        uint32_t ncmds = read_32(fd_req);
         for (uint32_t i = 0; i < ncmds; i++) {
             char sub_path[512];
             snprintf(sub_path, sizeof(sub_path), "%s/%u", dir_path, i);
@@ -270,23 +270,23 @@ int save_cmd_recursive(int fd_req, char *dir_path) {
 }
 
 void traiter_create(int fd_req, char *rep_path, char *base_path, tasks **T, uint64_t *nbtasks) {
-    printf("[Client] Creation (CR)\n");
+    printf("Creation (CR)\n");
     uint64_t new_id = get_next_id(*T, *nbtasks);
     
     char task_dir[512];
     snprintf(task_dir, sizeof(task_dir), "%s/%llu", base_path, (unsigned long long)new_id);
     mkdir(task_dir, 0700);
     
-    uint64_t min = read_u64(fd_req);
-    uint32_t hour = read_u32(fd_req);
+    uint64_t min = read_64(fd_req);
+    uint32_t hour = read_32(fd_req);
     uint8_t day;
     read_all(fd_req, &day, 1);
 
     char path_timing[512];
     snprintf(path_timing, sizeof(path_timing), "%s/timing", task_dir);
     int fd_time = open(path_timing, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    write_u64(fd_time, min);
-    write_u32(fd_time, hour);
+    write_64(fd_time, min);
+    write_32(fd_time, hour);
     write(fd_time, &day, 1);
     close(fd_time);
 
@@ -300,24 +300,24 @@ void traiter_create(int fd_req, char *rep_path, char *base_path, tasks **T, uint
 
     int fd_rep = open(rep_path, O_WRONLY);
     if (fd_rep != -1) {
-        write_u16(fd_rep, REP_OK);
-        write_u64(fd_rep, new_id);
+        write_16(fd_rep, REP_OK);
+        write_64(fd_rep, new_id);
         close(fd_rep);
     }
 }
 
 void traiter_combine(int fd_req, char *rep_path, char *base_path, tasks **T, uint64_t *nbtasks) {
-    printf("[Client] Combinaison (CB)\n");
+    printf("Combinaison (CB)\n");
 
-    read_u16(fd_req); 
+    read_16(fd_req); 
 
-    uint64_t min = read_u64(fd_req);
-    uint32_t hour = read_u32(fd_req);
+    uint64_t min = read_64(fd_req);
+    uint32_t hour = read_32(fd_req);
     uint8_t day;
     read_all(fd_req, &day, 1);
 
-    uint16_t type_comb = read_u16(fd_req);
-    uint32_t count = read_u32(fd_req);
+    uint16_t type_comb = read_16(fd_req);
+    uint32_t count = read_32(fd_req);
 
     if (type_comb == TYPE_IF && (count < 2 || count > 3)) {
         fprintf(stderr, "Erreur IF: %d args\n", count);
@@ -327,8 +327,8 @@ void traiter_combine(int fd_req, char *rep_path, char *base_path, tasks **T, uin
         }
         int fd_rep = open(rep_path, O_WRONLY);
         if (fd_rep != -1) {
-            write_u16(fd_rep, REP_ERR);
-            write_u16(fd_rep, 0x4E46);
+            write_16(fd_rep, REP_ERR);
+            write_16(fd_rep, 0x4E46);
             close(fd_rep);
         }
         return;
@@ -349,8 +349,8 @@ void traiter_combine(int fd_req, char *rep_path, char *base_path, tasks **T, uin
     char path_timing[512];
     snprintf(path_timing, sizeof(path_timing), "%s/timing", task_dir);
     int fd_time = open(path_timing, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    write_u64(fd_time, min);
-    write_u32(fd_time, hour);
+    write_64(fd_time, min);
+    write_32(fd_time, hour);
     write(fd_time, &day, 1);
     close(fd_time);
 
@@ -361,7 +361,7 @@ void traiter_combine(int fd_req, char *rep_path, char *base_path, tasks **T, uin
     char path_type[512];
     snprintf(path_type, sizeof(path_type), "%s/type", cmd_dir);
     int fd_type = open(path_type, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    write_u16(fd_type, type_comb); 
+    write_16(fd_type, type_comb); 
     close(fd_type);
 
     for (uint32_t i = 0; i < count; i++) {
@@ -375,7 +375,7 @@ void traiter_combine(int fd_req, char *rep_path, char *base_path, tasks **T, uin
     for (uint32_t i = 0; i < count; i++) {
         char old_dir[512];
         snprintf(old_dir, sizeof(old_dir), "%s/%llu", base_path, (unsigned long long)ids[i]);
-        remove_directory(old_dir);
+        rm_dir(old_dir);
     }
 
     free(ids);
@@ -385,8 +385,8 @@ void traiter_combine(int fd_req, char *rep_path, char *base_path, tasks **T, uin
 
     int fd_rep = open(rep_path, O_WRONLY);
     if (fd_rep != -1) {
-        write_u16(fd_rep, REP_OK);
-        write_u64(fd_rep, new_id);
+        write_16(fd_rep, REP_OK);
+        write_64(fd_rep, new_id);
         close(fd_rep);
     }
 }
@@ -428,30 +428,20 @@ int main(int argc, char *argv[]) {
     if (stat(chemin_pipes, &st) == -1) mkdir(chemin_pipes, 0700);
     mkfifo(req, 0622);
     mkfifo(rep, 0622);
-
+    
     if (!avantPlan) {
         if (fork() > 0) exit(0);
         setsid();
         if (fork() > 0) exit(0);
-        int fd_null = open("/dev/null", O_RDWR);
-        if (fd_null != -1) {
-            dup2(fd_null, STDIN_FILENO);
-            dup2(fd_null, STDOUT_FILENO);
-            dup2(fd_null, STDERR_FILENO);
-            if (fd_null > 2) close(fd_null);
-        }
+        close(1) ; close(0) ; close(2) ; 
     }
 
-    struct sigaction sa;
+    struct sigaction sa = { 0 };
     sa.sa_handler = handler_timer;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
     sigaction(SIGALRM, &sa, NULL);
 
-    struct sigaction sa_int;
+    struct sigaction sa_int = { 0 };
     sa_int.sa_handler = handler_arret;
-    sigemptyset(&sa_int.sa_mask);
-    sa_int.sa_flags = 0;
     sigaction(SIGINT, &sa_int, NULL);
     sigaction(SIGTERM, &sa_int, NULL);
 
@@ -466,8 +456,28 @@ int main(int argc, char *argv[]) {
         
         int sec_to_wait = 60 - tm_now.tm_sec;
         if (sec_to_wait <= 0) sec_to_wait = 1;
+        
+        if (timer_expired) { 
+            timer_expired = 0;
+            time_t t2 = time(NULL);
+            struct tm tm2;
+            localtime_r(&t2, &tm2);
+                    
+            for (uint64_t i = 0; i < nbtasks; i++) {
+                if (should_run(&T[i], &tm2)) {
+                    if (fork() == 0) {
+                        if (fork() == 0) {
+                                execute_task(&T[i]);
+                                exit(0);
+                        }
+                        exit(0);
+                    }
+                     wait(NULL);
+                }
+            }
+        }
 
-        alarm(sec_to_wait);
+        alarm(sec_to_wait); 
 
         uint16_t opcode_be;
         ssize_t n = read(fd_req, &opcode_be, 2);
@@ -527,7 +537,7 @@ int main(int argc, char *argv[]) {
             running = 0;
             int f = open(rep, O_WRONLY);
             if(f != -1) {
-                write_u16(f, REP_OK);
+                write_16(f, REP_OK);
                 close(f);
             }
         }

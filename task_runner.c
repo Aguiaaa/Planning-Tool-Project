@@ -27,8 +27,8 @@ void log_execution(tasks *T, int exit_code) {
         return;
     }
 
-    write_u64(fd, (uint64_t)time(NULL));
-    write_u16(fd, (uint16_t)exit_code);
+    write_64(fd, (uint64_t)time(NULL));
+    write_16(fd, (uint16_t)exit_code);
     
     close(fd);
 }

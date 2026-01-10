@@ -59,11 +59,11 @@ void print_timing(uint64_t val, int max) {
 }
 
 uint16_t print_cmd_recursive(int fd, int is_root) {
-    uint16_t type = read_u16(fd);
+    uint16_t type = read_16(fd);
     if (type == TYPE_SIMPLE) {
-        uint32_t argc = read_u32(fd);
+        uint32_t argc = read_32(fd);
         for (uint32_t i = 0; i < argc; i++) {
-            uint32_t len = read_u32(fd);
+            uint32_t len = read_32(fd);
             char buf[len + 1];
             read_all(fd, buf, len);
             buf[len] = '\0';
@@ -72,7 +72,7 @@ uint16_t print_cmd_recursive(int fd, int is_root) {
         }
     } 
     else if (type == TYPE_SEQ || type == TYPE_PL) {
-        uint32_t ncmds = read_u32(fd);
+        uint32_t ncmds = read_32(fd);
         char *sep = (type == TYPE_SEQ) ? " ; " : " | ";
 
         if (!is_root) printf("("); 
@@ -86,7 +86,7 @@ uint16_t print_cmd_recursive(int fd, int is_root) {
         if (!is_root) printf(" )"); 
     } 
     else if (type == TYPE_IF) {
-        uint32_t ncmds = read_u32(fd);
+        uint32_t ncmds = read_32(fd);
         printf("( if "); 
 
         uint16_t t_cond = print_cmd_recursive(fd, 0);
@@ -162,13 +162,13 @@ int main(int argc, char *argv[]) {
             fd_rep = open(rep, O_RDONLY);
             if (fd_rep == -1) { perror("open rep"); exit(1); }
 
-            uint16_t reponse = read_u16(fd_rep);
+            uint16_t reponse = read_16(fd_rep);
             if (reponse == 0x4F4B) {
-                uint32_t nbtasks = read_u32(fd_rep);
+                uint32_t nbtasks = read_32(fd_rep);
                 for (uint32_t i = 0; i < nbtasks; i++) {
-                    uint64_t id = read_u64(fd_rep);
-                    uint64_t m = read_u64(fd_rep);
-                    uint32_t h = read_u32(fd_rep);
+                    uint64_t id = read_64(fd_rep);
+                    uint64_t m = read_64(fd_rep);
+                    uint32_t h = read_32(fd_rep);
                     uint8_t d;
                     read_all(fd_rep, &d, 1);
 
@@ -219,19 +219,19 @@ int main(int argc, char *argv[]) {
             fd_req = open(req, O_WRONLY);
             if (fd_req == -1) { perror("Erreur ouverture pipe requete"); exit(1); }
 
-            write_u16(fd_req, 0x5458);
-            write_u64(fd_req, id);
+            write_16(fd_req, 0x5458);
+            write_64(fd_req, id);
             close(fd_req);
 
             fd_rep = open(rep, O_RDONLY);
             if (fd_rep == -1) { perror("Erreur ouverture pipe reponse"); exit(1); }
 
-            uint16_t status = read_u16(fd_rep);
+            uint16_t status = read_16(fd_rep);
             if (status == 0x4F4B) {
-                uint32_t nombre_execs = read_u32(fd_rep);
+                uint32_t nombre_execs = read_32(fd_rep);
                 for (uint32_t i = 0; i < nombre_execs; i++) {
-                    uint64_t timestamp = read_u64(fd_rep);
-                    uint16_t code_retour = read_u16(fd_rep);
+                    uint64_t timestamp = read_64(fd_rep);
+                    uint16_t code_retour = read_16(fd_rep);
                     time_t t = (time_t)timestamp;
                     struct tm *info = localtime(&t);
                     char date_lisible[64];
@@ -253,16 +253,16 @@ int main(int argc, char *argv[]) {
 
             fd_req = open(req, O_WRONLY);
             if (fd_req == -1) { perror("Erreur ouverture pipe requete"); exit(1); }
-            write_u16(fd_req, 0x534F);
-            write_u64(fd_req, id);
+            write_16(fd_req, 0x534F);
+            write_64(fd_req, id);
             close(fd_req);
 
             fd_rep = open(rep, O_RDONLY);
             if (fd_rep == -1) { perror("Erreur ouverture pipe reponse"); exit(1); }
 
-            uint16_t status = read_u16(fd_rep);
+            uint16_t status = read_16(fd_rep);
             if (status == 0x4F4B) {
-                uint32_t taille_fichier = read_u32(fd_rep);
+                uint32_t taille_fichier = read_32(fd_rep);
                 char buffer[1024];
                 uint32_t total_lu = 0;
                 while (total_lu < taille_fichier) {
@@ -288,16 +288,16 @@ int main(int argc, char *argv[]) {
 
             fd_req = open(req, O_WRONLY);
             if (fd_req == -1) { perror("Erreur ouverture pipe requete"); exit(1); }
-            write_u16(fd_req, 0x5345);
-            write_u64(fd_req, id);
+            write_16(fd_req, 0x5345);
+            write_64(fd_req, id);
             close(fd_req);
 
             fd_rep = open(rep, O_RDONLY);
             if (fd_rep == -1) { perror("Erreur ouverture pipe reponse"); exit(1); }
 
-            uint16_t status = read_u16(fd_rep);
+            uint16_t status = read_16(fd_rep);
             if (status == 0x4F4B) {
-                uint32_t taille_fichier = read_u32(fd_rep);
+                uint32_t taille_fichier = read_32(fd_rep);
                 char buffer[1024];
                 uint32_t total_lu = 0;
                 while (total_lu < taille_fichier) {
@@ -323,18 +323,18 @@ int main(int argc, char *argv[]) {
 
             fd_req = open(req, O_WRONLY);
             if (fd_req == -1) { perror("Erreur ouverture pipe requete"); exit(1); }
-            write_u16(fd_req, 0x524D);
-            write_u64(fd_req, id);
+            write_16(fd_req, 0x524D);
+            write_64(fd_req, id);
             close(fd_req);
 
             fd_rep = open(rep, O_RDONLY);
             if (fd_rep == -1) { perror("Erreur ouverture pipe reponse"); exit(1); }
 
-            uint16_t status = read_u16(fd_rep);
+            uint16_t status = read_16(fd_rep);
             if (status == 0x4F4B) {
                 printf("Tâche %llu supprimée avec succès.\n", (unsigned long long)id);
             } else {
-                uint16_t err = read_u16(fd_rep);
+                uint16_t err = read_16(fd_rep);
                 if (err == 0x4E46) fprintf(stderr, "Erreur : Tâche %llu introuvable (NF).\n", (unsigned long long)id);
                 else fprintf(stderr, "Erreur : Code 0x%x\n", err);
             }
@@ -348,11 +348,11 @@ int main(int argc, char *argv[]) {
 
             fd_req = open(req, O_WRONLY);
             if (fd_req == -1) { perror("open req"); exit(1); }
-            write_u16(fd_req, 0x4b49);
+            write_16(fd_req, 0x4b49);
             close(fd_req);
 
             fd_rep = open(rep, O_RDONLY);
-            if (read_u16(fd_rep) == 0x4F4B) {
+            if (read_16(fd_rep) == 0x4F4B) {
                 printf("Démon arrêté avec succès.\n");
             }
             close(fd_rep);
@@ -382,18 +382,18 @@ int main(int argc, char *argv[]) {
         fd_req = open(req, O_WRONLY);
         if (fd_req == -1) { perror("open req"); exit(1); }
 
-        write_u16(fd_req, 0x4352); 
-        write_u64(fd_req, min);
-        write_u32(fd_req, hour);
+        write_16(fd_req, 0x4352); 
+        write_64(fd_req, min);
+        write_32(fd_req, hour);
         write(fd_req, &day, 1);
 
-        write_u16(fd_req, 0x5349);
-        write_u32(fd_req, cmd_argc);
+        write_16(fd_req, 0x5349);
+        write_32(fd_req, cmd_argc);
 
         for (int i = 0; i < cmd_argc; i++) {
             char *arg = argv[optind + i];
             uint32_t len = strlen(arg);
-            write_u32(fd_req, len);
+            write_32(fd_req, len);
             write(fd_req, arg, len);
         }
         close(fd_req);
@@ -401,9 +401,9 @@ int main(int argc, char *argv[]) {
         fd_rep = open(rep, O_RDONLY);
         if (fd_rep == -1) { perror("open rep"); exit(1); }
 
-        uint16_t status = read_u16(fd_rep);
+        uint16_t status = read_16(fd_rep);
         if (status == 0x4F4B) { 
-            uint64_t new_id = read_u64(fd_rep);
+            uint64_t new_id = read_64(fd_rep);
             printf("Tache creee avec succes. ID: %llu\n", (unsigned long long)new_id);
         } else {
             fprintf(stderr, "Erreur lors de la creation (Code 0x%x)\n", status);
@@ -433,34 +433,34 @@ int main(int argc, char *argv[]) {
         fd_req = open(req, O_WRONLY);
         if (fd_req == -1) { perror("open req"); exit(1); }
 
-        write_u16(fd_req, COMBINE); 
+        write_16(fd_req, COMBINE); 
 
-        write_u16(fd_req, 0); 
+        write_16(fd_req, 0); 
 
-        write_u64(fd_req, min);
-        write_u32(fd_req, hour);
+        write_64(fd_req, min);
+        write_32(fd_req, hour);
         write(fd_req, &day, 1);
 
         uint16_t type_to_send = 0;
         if (seq_mode) type_to_send = TYPE_SEQ;
         else if (pipe_mode) type_to_send = TYPE_PL;
         else if (if_mode) type_to_send = TYPE_IF;
-        write_u16(fd_req, type_to_send);
-        write_u32(fd_req, count);
+        write_16(fd_req, type_to_send);
+        write_32(fd_req, count);
         for (int i = 0; i < count; i++) {
-            write_u64(fd_req, ids[i]);
+            write_64(fd_req, ids[i]);
         }
         free(ids);
         close(fd_req);
         fd_rep = open(rep, O_RDONLY);
         if (fd_rep == -1) { perror("open rep"); exit(1); }
 
-        uint16_t status = read_u16(fd_rep);
+        uint16_t status = read_16(fd_rep);
         if (status == 0x4F4B) {
-            uint64_t new_id = read_u64(fd_rep);
+            uint64_t new_id = read_64(fd_rep);
             printf("%llu\n", (unsigned long long)new_id); 
         } else {
-            uint16_t err = read_u16(fd_rep);
+            uint16_t err = read_16(fd_rep);
             fprintf(stderr, "Erreur combinaison (Code 0x%x)\n", err);
         }
         close(fd_rep);

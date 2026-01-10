@@ -153,8 +153,6 @@ tasks *  read_tasks (char * chemin) {
             tache.chemin.DATA = malloc(length + 1);
             strcpy((char*)tache.chemin.DATA, chemin_tache);
             tache.chemin.LENGTH = length;
-            printf("chemin tache : %s\n ", tache.chemin.DATA) ; 
-           
             
             char chemin_fichier_timing[256] ;
             snprintf (chemin_fichier_timing , sizeof chemin_fichier_timing , "%s/timing" , chemin_tache ) ;  
