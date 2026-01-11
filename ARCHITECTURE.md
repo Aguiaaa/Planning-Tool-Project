@@ -1,42 +1,49 @@
 # Architecture du projet Erraid & Tadmor
 
-## Vue d'ensemble
-Nous avons découpé le projet en deux exécutables distincts pour séparer le démon (serveur) et l'interface utilisateur (client) :
-1. **erraid** : Le démon qui tourne en fond, gère le stockage et exécute les tâches.
-2. **tadmor** : Le client qui permet d'envoyer des commandes au démon via des tubes nommés.
+## Vue globale
+On a séparé le projet en deux programmes différents pour bien distinguer le client et le serveur :
+1. **erraid** : C'est le démon (le serveur). Il tourne tout le temps en arrière-plan, garde les tâches en mémoire et s'occupe de les lancer à la bonne heure.
+2. **tadmor** : C'est le client. C'est juste une commande qui permet à l'utilisateur d'envoyer des ordres au démon (comme "crée une tâche" ou "liste les tâches") via des tubes nommés.
 
-## Structures de données
-Pour gérer les tâches en mémoire, nous avons défini plusieurs structures dans `erraid.h` :
+## Comment on stocke les données (`erraid.h`)
+Pour gérer les tâches dans le démon, on utilise plusieurs structures :
 
-- **`tasks`** : C'est la structure principale. Elle contient l'ID de la tâche, son timing, et un pointeur vers la commande à exécuter.
-- **`timing`** : Pour stocker les horaires (minutes, heures, jours), nous utilisons des entiers (`uint64`, `uint32`) comme des masques de bits. Cela permet de vérifier rapidement si l'heure correspond.
-- **`command`** : Comme une commande peut être complexe (séquence, pipe...), nous avons utilisé une structure récursive (un arbre). Une commande contient soit des arguments (si elle est simple), soit une liste de sous-commandes.
+- **`tasks`** : La structure de base. Elle contient l'ID, le timing, et la commande à lancer.
+- **`timing`** : On utilise des entiers pour stocker les minutes, heures et jours sous forme de bits. Ça nous permet de vérifier très vite si une tâche doit se lancer (avec des opérations `&`).
+- **`command`** : Comme une commande peut être compliquée (des pipes, des séquences...), on a fait une structure récursive (un arbre).
+    - Soit c'est une commande simple (avec des arguments).
+    - Soit c'est une combinaison (Séquence, Pipe, If) qui contient d'autres commandes en dessous.
 
-## Algorithmes implémentés
+## Nos Algorithmes
 
-### 1. Lecture des tâches (Parsing)
-Pour charger les tâches depuis le dossier de sauvegarde, nous utilisons une fonction récursive (`read_cmd` dans `parsing_tasks.c`).
-- On parcourt les dossiers.
-- Si on trouve un fichier `argv`, c'est une commande simple : on lit les arguments.
-- Si on trouve des sous-dossiers (0, 1, 2...), c'est une commande complexe : la fonction s'appelle elle-même pour charger chaque sous-commande.
+### 1. Charger les tâches (Parsing)
+Pour lire les tâches depuis le disque, on a une fonction récursive (`read_cmd`) qui se promène dans les dossiers :
+- Elle regarde le fichier `type` pour savoir ce que c'est.
+- Si c'est une commande complexe, elle descend dans les sous-dossiers `0`, `1`... pour tout reconstruire en mémoire.
 
-### 2. Vérification des horaires
-Dans `task_runner.c`, la fonction `should_run` vérifie si une tâche doit se lancer maintenant.
-On utilise des opérations bit-à-bit (`&`) entre le masque de la tâche et l'heure actuelle. Par exemple, pour les minutes, on vérifie si le bit correspondant à la minute actuelle est à 1.
+### 2. Vérifier l'heure
+Dans `task_runner.c`, la fonction `should_run` regarde si une tâche doit se lancer. Elle compare simplement l'heure actuelle avec les masques de bits de la tâche. Si ça correspond partout (minute, heure, jour), on lance !
 
-### 3. Exécution des commandes
-L'exécution (`run` dans `task_runner.c`) suit la structure de l'arbre de commande :
-- **Commande simple** : On fait un `fork` puis un `execvp`.
-- **Séquence (;)** : On exécute les commandes les unes après les autres.
-- **Pipeline (|)** : On crée des pipes dans une boucle. On utilise `dup2` pour brancher la sortie standard d'une commande sur l'entrée standard de la suivante.
-- **Condition (if)** : On lance la première commande. Si elle réussit (retour 0), on lance la suite ("then"), sinon on lance le "else".
+### 3. Exécuter les commandes
+La fonction `run` parcourt l'arbre de la commande :
+- **Simple** : On fait un `fork` et un `execvp`.
+- **Pipe (|)** : On crée des tubes (`pipe`) et on utilise `dup2` pour relier la sortie d'une commande à l'entrée de la suivante.
+- **If** : On lance la première commande, on attend son résultat, et selon si elle a réussi ou pas, on lance la suite (then ou else).
 
-### 4. Fonctionnement du Démon
-Le démon (`erraid.c`) fonctionne avec une boucle principale :
-1. On calcule le temps restant avant la prochaine minute et on met une `alarm`.
-2. On se met en attente de lecture (`read`) sur le pipe de requêtes pour écouter `tadmor`.
-3. Si l'alarme sonne (`SIGALRM`), le `read` est interrompu. On parcourt alors la liste des tâches et on lance celles qui doivent s'exécuter via un double `fork` (pour éviter les processus zombies).
-4. Si on reçoit une requête du client, on la traite (création, suppression, etc.).
+## Fonctionnement du Démon 
+Au début, on utilisait `alarm` et des signaux pour réveiller le démon chaque minute. C'était compliqué et ça posait des problèmes avec les appels systèmes interrompus (`EINTR`).
 
-## Gestion de la mémoire
-Comme le démon doit tourner longtemps, nous avons fait attention aux fuites de mémoire. Lors du rechargement des tâches (après une création ou suppression), nous appelons `free_tasks` qui parcourt récursivement toute la structure pour tout libérer proprement avant de recharger.
+On a décidé de tout changer pour utiliser **`poll`**. Voici comment ça marche maintenant dans le `main` :
+
+1. **On calcule l'attente** : On regarde combien de millisecondes il reste avant la prochaine minute pile.
+2. **On s'endort** : On appelle `poll`. Le démon ne fait rien et ne consomme pas de CPU.
+3. **Le réveil** : Il se réveille seulement si :
+    - Le temps est écoulé -> On vérifie les tâches et on les lance.
+    - On reçoit une commande sur le tube -> On la traite tout de suite.
+
+Pour lancer les tâches, on utilise la technique du **"Double Fork"**. Le démon crée un fils, qui crée un autre fils (la tâche) et meurt tout de suite. Comme ça, la tâche est adoptée par le système (init) et on n'a pas de processus zombies qui traînent.
+
+## Nos Optimisations 
+
+- **`rename` au lieu de copier** : Quand on combine des tâches (par exemple pour faire un Pipe), au lieu de copier tous les fichiers un par un (ce qui est long et risqué), on utilise `rename`. Ça déplace juste le dossier instantanément. C'est "atomique", donc plus sûr.
+- **Nettoyage avec `kill`** : Quand on arrête le démon, on veut être sûr que toutes les tâches s'arrêtent aussi. On utilise `kill(0, SIGTERM)` qui envoie le signal d'arrêt à tout notre groupe de processus. Comme ça, il ne reste rien qui tourne en arrière-plan.
