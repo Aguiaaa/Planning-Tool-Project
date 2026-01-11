@@ -22,7 +22,7 @@ Pour lire les tâches depuis le disque, on a une fonction récursive (`read_cmd`
 - Si c'est une commande complexe, elle descend dans les sous-dossiers `0`, `1`... pour tout reconstruire en mémoire.
 
 ### 2. Vérifier l'heure
-Dans `task_runner.c`, la fonction `should_run` regarde si une tâche doit se lancer. Elle compare simplement l'heure actuelle avec les masques de bits de la tâche. Si ça correspond partout (minute, heure, jour), on lance !
+Dans `task_runner.c`, la fonction `should_run` regarde si une tâche doit se lancer. Elle compare simplement l'heure actuelle avec les masques de bits de la tâche. Si ça correspond partout (minute, heure, jour), on lance.
 
 ### 3. Exécuter les commandes
 La fonction `run` parcourt l'arbre de la commande :
