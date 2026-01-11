@@ -1,120 +1,109 @@
-# Projet outil de planification - 2025 
-## erraid & tadmor — Jalon 2
+# Projet Système : Planificateur de tâches (Erraid & Tadmor)
 
-Ce projet implémente un système de planification de tâches inspiré de `cron`, composé :
+Projet réalisé dans le cadre du cours de Système d'Exploitation.
+L'objectif est de créer un outil capable de programmer l'exécution de commandes à l'avance, un peu comme le `cron` de Linux.
 
-- d’un **démon** `erraid`, chargé d’exécuter des tâches selon des horaires donnés ;
-- d’un **client** `tadmor`, permettant d’envoyer des requêtes consultatives au démon.
+## Auteurs
+- **GUIA Amine** (22305962)
+- **GUIRIEV Abdula** (22315618)
 
-Pour ce jalon 2, le démon doit exploiter une arborescence statique de tâches (simples ou séquentielles) et répondre aux requêtes du client.
-
----
+## Description
+Le projet se compose de deux programmes :
+1. **erraid** : Le démon (serveur). Il tourne en arrière-plan, surveille l'heure et lance les tâches.
+2. **tadmor** : Le client. Il permet d'envoyer des commandes au démon.
 
 ## Compilation
-
-Compiler les exécutables `erraid` et `tadmor` :
-```
-make
-```
-
-ou manuellement :
-```
-gcc -Wall -Wextra -o erraid erraid.c task_runner.c protocole.c parsing_tasks.c
-gcc -Wall -Wextra -o tadmor tadmor.c protocole.c
+```bash
+make            # Crée les exécutables erraid et tadmor
+make distclean  # Supprime les fichiers compilés
 ```
 
-Nettoyer les fichiers compilés :
-```
-make distclean
-```
+## Manuel d'utilisation
 
----
+### 1. Le Démon (erraid)
 
-## Lancement du démon `erraid`
-
-Utilisation avec le répertoire par défaut :  
-```
+**Lancement standard :**
+```bash
 ./erraid
 ```
+Le démon se détache et tourne en arrière-plan.
 
-Spécifier un répertoire de stockage (contenant `tasks/`) :
-```
-./erraid -r <chemin>
-```
-Spécifier le répertoire contenant les tubes de communication (par defaut `/tmp/$USER/erraid/pipes`) :
-```
-./erraid -p <chemin>
-```
+**Options disponibles :**
+- `-R <dir>` : Spécifie le dossier de stockage (par défaut `/tmp/$USER/erraid/tasks`).
+- `-P <dir>` : Spécifie le dossier des tubes nommés (par défaut `/tmp/$USER/erraid/pipes`).
+- `-F` : Force l'exécution en avant-plan (pas de mode démon), utile pour le débogage.
 
-À son démarrage, `erraid` crée les pipes nommés nécessaires :  
-- `erraid-request-pipe`  
-- `erraid-reply-pipe`
-
----
-
-## Utilisation du client `tadmor`
-
-`tadmor` envoie une requête au démon via le pipe de requête  
-et affiche la réponse reçue via le pipe de réponse.
-
-### Options implémentées (Jalon 2)
-
-#### Requêtes consultatives
-```
--l
-```
-Affiche la liste des tâches définies dans l’arborescence.
-
-```
--x TASKID
-```
-Affiche la liste datée des valeurs de retour de la tâche `TASKID`.
-
-```
--o TASKID
-```
-Affiche la sortie standard de la dernière exécution complète.
-
-```
--e TASKID
-```
-Affiche l’erreur standard de la dernière exécution complète.
-
-#### Spécifier le répertoire des pipes
-```
--p <chemin_pipes>
-```
-Permet d’utiliser un répertoire pipes différent de la valeur par défaut.
-
----
-
-## Exemples d’utilisation
-
-Liste des tâches :
-```
-tadmor -l
+*Exemple complet :*
+```bash
+./erraid -F -R ./mes_taches -P ./mes_pipes
 ```
 
-Voir les retours d’exécution :
-```
-tadmor -x 42
-```
+### 2. Le Client (tadmor)
 
-Sortie standard de la dernière exécution :
-```
-tadmor -o 42
-```
+Toutes les commandes acceptent l'option `-P <dir>` pour spécifier où chercher les tubes du démon.
 
-Erreur standard :
-```
-tadmor -e 42
-```
+#### A. Consultation et Gestion
+- **Lister les tâches :**
+  ```bash
+  ./tadmor -l
+  ```
+- **Supprimer une tâche :**
+  ```bash
+  ./tadmor -r <ID>
+  ```
+- **Arrêter le démon :**
+  ```bash
+  ./tadmor -q
+  ```
 
-Utilisation avec un répertoire pipes personnalisé :
-```
-tadmor -p /tmp/$USER/erraid/pipes -l
-```
+#### B. Inspection des résultats
+- **Historique des exécutions** (dates et codes de retour) :
+  ```bash
+  ./tadmor -x <ID>
+  ```
+- **Voir la sortie standard (stdout) de la dernière exécution :**
+  ```bash
+  ./tadmor -o <ID>
+  ```
+- **Voir la sortie d'erreur (stderr) de la dernière exécution :**
+  ```bash
+  ./tadmor -e <ID>
+  ```
 
----
+#### C. Création de tâches simples
+Créer une tâche nécessite `-c`.
+Les horaires se définissent avec :
+- `-m` : Minutes (0-59)
+- `-H` : Heures (0-23)
+- `-d` : Jours (0=Dimanche, 6=Samedi)
+- `-n` : Tâche abstraite (sans horaire, ne s'exécute jamais seule)
 
 
+
+#### D. Combinaisons de tâches
+Vous pouvez combiner des tâches existantes (par leurs IDs).
+
+- **Séquence (`;`)** - Option `-s` :
+  Exécute les tâches l'une après l'autre.
+  ```bash
+  ./tadmor -s <ID1> <ID2>
+  ```
+
+- **Pipeline (`|`)** - Option `-p` :
+  La sortie de la tâche 1 devient l'entrée de la tâche 2.
+  ```bash
+  ./tadmor -p <ID1> <ID2>
+  ```
+
+- **Conditionnelle (`if/then/else`)** - Option `-i` :
+  Si la tâche 1 réussit (code 0), lance la tâche 2, sinon la 3.
+  ```bash
+  ./tadmor -i <ID_COND> <ID_THEN> <ID_ELSE>
+  ```
+
+## Structure du projet
+- `erraid.c` : Boucle principale du démon, gestion des signaux et initialisation.
+- `tadmor.c` : Parsing des arguments ligne de commande et envoi des requêtes.
+- `task_runner.c` : Logique d'exécution (fork/exec, redirection flux, vérification horaires).
+- `parsing_tasks.c` : Gestion de la persistance (lecture/écriture récursive sur disque).
+- `protocole.c` : Sérialisation binaire (Big-Endian) pour la communication via pipes.

@@ -39,25 +39,56 @@ void read_cmd (command * c , char * chemin, char * chemin_cmd) {
         if (c->type == TYPE_SIMPLE) {
             char chemin_argv [256] ; 
             snprintf(chemin_argv , sizeof chemin_argv ,"%s/argv" , chemin_cmd) ;
+            
             int fd_argv = open (chemin_argv , O_RDONLY) ; 
-            ssize_t n  ; 
+            if (fd_argv == -1) {
+                c->args.ARGC = 0;
+                c->args.ARGV = NULL;
+                return;
+            }
+            ssize_t n ; 
             uint32_t argc ; 
+
             n = read (fd_argv , &argc , 4 ) ;  
+            if (n != 4) {
+                close(fd_argv);
+                c->args.ARGC = 0;
+                c->args.ARGV = NULL;
+                return;
+            }
             c->args.ARGC = be32toh(argc) ; 
+
+            if (c->args.ARGC > 1000) { 
+                c->args.ARGC = 0; 
+                close(fd_argv); 
+                return; 
+            }
+
             c->args.ARGV = malloc(c->args.ARGC * sizeof(string));
+            
+            if (c->args.ARGV == NULL) {
+                c->args.ARGC = 0;
+                close(fd_argv);
+                return;
+            }
+
             for (uint32_t i = 0 ; i < c->args.ARGC ; ++i ) {
                 uint32_t length ; 
                 n = read (fd_argv , &length , 4) ;
+                if (n != 4) { break; } 
+
                 length = be32toh(length);
                 c->args.ARGV[i].LENGTH = length ;
                 c->args.ARGV[i].DATA = malloc (length + 1) ;  
-                read(fd_argv, c->args.ARGV[i].DATA, length);
-                c->args.ARGV[i].DATA[length] = '\0';
+                
+                if (c->args.ARGV[i].DATA) {
+                    read(fd_argv, c->args.ARGV[i].DATA, length);
+                    c->args.ARGV[i].DATA[length] = '\0';
+                }
             }
             
             close(fd_argv) ; 
             return ; 
-
         }
         else {
             struct dirent *entry; 
@@ -122,8 +153,6 @@ tasks *  read_tasks (char * chemin) {
             tache.chemin.DATA = malloc(length + 1);
             strcpy((char*)tache.chemin.DATA, chemin_tache);
             tache.chemin.LENGTH = length;
-            printf("chemin tache : %s\n ", tache.chemin.DATA) ; 
-           
             
             char chemin_fichier_timing[256] ;
             snprintf (chemin_fichier_timing , sizeof chemin_fichier_timing , "%s/timing" , chemin_tache ) ;  
@@ -153,4 +182,42 @@ tasks *  read_tasks (char * chemin) {
     return TASKS; 
 
 
+}
+
+
+void free_cmd_recursive(command *cmd) {
+    if (!cmd) return;
+    
+    if (cmd->type == TYPE_SIMPLE) {
+        if (cmd->args.ARGV) {
+            for (uint32_t i = 0; i < cmd->args.ARGC; i++) {
+                if (cmd->args.ARGV[i].DATA) {
+                    free(cmd->args.ARGV[i].DATA);
+                }
+            }
+            free(cmd->args.ARGV);
+        }
+    } else {
+        if (cmd->combinaison.sous_command) {
+            for (uint32_t i = 0; i < cmd->combinaison.ncmds; i++) {
+                free_cmd_recursive(&cmd->combinaison.sous_command[i]);
+            }
+            free(cmd->combinaison.sous_command);
+        }
+    }
+}
+
+void free_tasks(tasks *T, uint64_t count) {
+    if (!T) return;
+    
+    for (uint64_t i = 0; i < count; i++) {
+        if (T[i].chemin.DATA) {
+            free(T[i].chemin.DATA);
+        }
+        if (T[i].commandes) {
+            free_cmd_recursive(T[i].commandes);
+            free(T[i].commandes);
+        }
+    }
+    free(T);
 }
