@@ -7,6 +7,7 @@
 #include <signal.h>
 #include <time.h>
 #include <errno.h>
+#include <poll.h> 
 
 extern char *optarg;
 extern int optind;
@@ -14,106 +15,34 @@ char req[256];
 char rep[256];
 
 volatile sig_atomic_t running = 1;
-volatile sig_atomic_t timer_expired = 0;
 
 void handler_arret(int sig) {
     (void)sig;
     running = 0;
 }
 
-void handler_timer(int sig) {
-    (void)sig;
-    timer_expired = 1;
-}
-
-int cp_file(const char *src, const char *dst) {
-    int f1 = open(src, O_RDONLY);
-    if (f1 == -1) return -1;
-    
-    int f2 = open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    if (f2 == -1) {
-        close(f1);
-        return -1;
-    }
-
-    char buf[4096];
-    ssize_t n;
-    while ((n = read(f1, buf, sizeof(buf))) > 0) {
-        if (write(f2, buf, n) != n) {
-            close(f1);
-            close(f2);
-            return -1;
-        }
-    }
-    close(f1);
-    close(f2);
-    return 0;
-}
-
-int copy_recursive(const char *src, const char *dst) {
-    DIR *d = opendir(src);
-    if (!d) return -1;
-
-    if (mkdir(dst, 0700) == -1 && errno != EEXIST) {
-        closedir(d);
-        return -1;
-    }
-
-    struct dirent *e;
-    while ((e = readdir(d)) != NULL) {
-        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
-
-        char p_src[512], p_dst[512];
-        snprintf(p_src, sizeof(p_src), "%s/%s", src, e->d_name);
-        snprintf(p_dst, sizeof(p_dst), "%s/%s", dst, e->d_name);
-
-        struct stat st;
-        if (stat(p_src, &st) == 0) {
-            if (S_ISDIR(st.st_mode)) {
-                copy_recursive(p_src, p_dst);
-            } else if (S_ISREG(st.st_mode)) {
-                cp_file(p_src, p_dst);
-            }
-        }
-    }
-    closedir(d);
-    return 0;
-}
 
 int rm_dir(const char *path) {
     DIR *d = opendir(path);
-    size_t path_len = strlen(path);
-    int r = -1;
+    if (!d) return -1; 
 
-    if (d) {
-        struct dirent *p;
-        r = 0;
-        while (!r && (p = readdir(d))) {
-            int r2 = -1;
-            char *buf;
-            size_t len;
+    struct dirent *p;
+    while ((p = readdir(d))) {
+        if (!strcmp(p->d_name, ".") || !strcmp(p->d_name, "..")) continue;
 
-            if (!strcmp(p->d_name, ".") || !strcmp(p->d_name, "..")) continue;
-
-            len = path_len + strlen(p->d_name) + 2;
-            buf = malloc(len);
-
-            if (buf) {
-                struct stat statbuf;
-                snprintf(buf, len, "%s/%s", path, p->d_name);
-                if (!stat(buf, &statbuf)) {
-                    if (S_ISDIR(statbuf.st_mode)) r2 = rm_dir(buf);
-                    else r2 = unlink(buf);
-                }
-                free(buf);
-            }
-            r = r2;
+        char buf[512];
+        snprintf(buf, sizeof(buf), "%s/%s", path, p->d_name);
+        
+        struct stat st;
+        if (stat(buf, &st) == 0) {
+            if (S_ISDIR(st.st_mode)) rm_dir(buf); 
+            else unlink(buf); 
+        } else {
+            unlink(buf); 
         }
-        closedir(d);
     }
-
-    if (!r) r = rmdir(path);
-    return r;
+    closedir(d);
+    return rmdir(path);
 }
 
 void write_cmd_recursive(int fd, command *cmd) {
@@ -369,9 +298,11 @@ void traiter_combine(int fd_req, char *rep_path, char *base_path, tasks **T, uin
         snprintf(src_cmd, sizeof(src_cmd), "%s/%llu/cmd", base_path, (unsigned long long)ids[i]);
         char dst_subdir[512];
         snprintf(dst_subdir, sizeof(dst_subdir), "%s/%u", cmd_dir, i); 
-        copy_recursive(src_cmd, dst_subdir);
+   
+        if (rename(src_cmd, dst_subdir) == -1) {
+            perror("Erreur rename lors de la combinaison");
+        }
     }
-
     for (uint32_t i = 0; i < count; i++) {
         char old_dir[512];
         snprintf(old_dir, sizeof(old_dir), "%s/%llu", base_path, (unsigned long long)ids[i]);
@@ -390,7 +321,6 @@ void traiter_combine(int fd_req, char *rep_path, char *base_path, tasks **T, uin
         close(fd_rep);
     }
 }
-
 int main(int argc, char *argv[]) {
     char chemin_tasks[256], chemin_pipes[256];
     char *user = getenv("USER");
@@ -436,35 +366,39 @@ int main(int argc, char *argv[]) {
         close(1) ; close(0) ; close(2) ; 
     }
 
-    struct sigaction sa = { 0 };
-    sa.sa_handler = handler_timer;
-    sigaction(SIGALRM, &sa, NULL);
 
     struct sigaction sa_int = { 0 };
     sa_int.sa_handler = handler_arret;
     sigaction(SIGINT, &sa_int, NULL);
     sigaction(SIGTERM, &sa_int, NULL);
 
+    struct sigaction sa_ign = { 0 };
+    sa_ign.sa_handler = SIG_IGN;
+    sigaction(SIGPIPE, &sa_ign, NULL);
+
     int fd_req = open(req, O_RDWR);
     tasks *T = read_tasks(chemin_tasks);
     uint64_t nbtasks = number_of_tasks(chemin_tasks);
+
+    struct pollfd fds[1];
+    fds[0].fd = fd_req;      
+    fds[0].events = POLLIN;  
+
+
+    time_t start_t = time(NULL);
+    struct tm start_tm;
+    localtime_r(&start_t, &start_tm);
+    int prev_min = start_tm.tm_min;
 
     while (running) {
         time_t now = time(NULL);
         struct tm tm_now;
         localtime_r(&now, &tm_now);
         
-        int sec_to_wait = 60 - tm_now.tm_sec;
-        if (sec_to_wait <= 0) sec_to_wait = 1;
-        
-        if (timer_expired) { 
-            timer_expired = 0;
-            time_t t2 = time(NULL);
-            struct tm tm2;
-            localtime_r(&t2, &tm2);
-                    
+        if (tm_now.tm_min != prev_min) {
+            prev_min = tm_now.tm_min;
             for (uint64_t i = 0; i < nbtasks; i++) {
-                if (should_run(&T[i], &tm2)) {
+                if (should_run(&T[i], &tm_now)) {
                     if (fork() == 0) {
                         if (fork() == 0) {
                                 execute_task(&T[i]);
@@ -477,68 +411,42 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        alarm(sec_to_wait); 
+        int sec_to_wait = 60 - tm_now.tm_sec;
+        if (sec_to_wait <= 0) sec_to_wait = 1;
+        int timeout_ms = sec_to_wait * 1000; 
 
-        uint16_t opcode_be;
-        ssize_t n = read(fd_req, &opcode_be, 2);
+        int ret = poll(fds, 1, timeout_ms);
 
-        alarm(0); 
-
-        if (n == -1) {
-            if (errno == EINTR) {
-                if (timer_expired) {
-                    timer_expired = 0;
-                    time_t t2 = time(NULL);
-                    struct tm tm2;
-                    localtime_r(&t2, &tm2);
-                    
-                    for (uint64_t i = 0; i < nbtasks; i++) {
-                        if (should_run(&T[i], &tm2)) {
-                            if (fork() == 0) {
-                                if (fork() == 0) {
-                                    execute_task(&T[i]);
-                                    exit(0);
-                                }
-                                exit(0);
-                            }
-                            wait(NULL);
-                        }
-                    }
-                }
-                continue;
-            }
-            perror("read");
+        if (ret == -1) {
+            if (errno == EINTR) continue;
+            perror("poll");
             break;
         }
 
-        if (n == 0) continue;
+        if (ret > 0 && (fds[0].revents & POLLIN)) {
+            uint16_t opcode_be;
+            ssize_t n = read(fd_req, &opcode_be, 2);
 
-        uint16_t opcode = be16toh(opcode_be);
-        if (opcode == LIST) lister_taches(rep, T, nbtasks);
-        else if (opcode == 0x4352) traiter_create(fd_req, rep, chemin_tasks, &T, &nbtasks);
-        else if (opcode == COMBINE) traiter_combine(fd_req, rep, chemin_tasks, &T, &nbtasks);
-        else if (opcode == 0x524D) traiter_remove(fd_req, rep, chemin_tasks, &T, &nbtasks);
-        else if (opcode == STDOUT) {
-             uint64_t tmp;
-             read_all(fd_req, &tmp, 8);
-             traiter_xoe(rep, chemin_tasks, be64toh(tmp), "stdout");
-        }
-        else if (opcode == STDERR) {
-             uint64_t tmp;
-             read_all(fd_req, &tmp, 8);
-             traiter_xoe(rep, chemin_tasks, be64toh(tmp), "stderr");
-        }
-        else if (opcode == TIMES_EXITCODES) {
-             uint64_t tmp;
-             read_all(fd_req, &tmp, 8);
-             traiter_xoe(rep, chemin_tasks, be64toh(tmp), "times-exitcodes");
-        }
-        else if (opcode == TERM) {
-            running = 0;
-            int f = open(rep, O_WRONLY);
-            if(f != -1) {
-                write_16(f, REP_OK);
-                close(f);
+            if (n > 0) {
+                uint16_t opcode = be16toh(opcode_be);
+                if (opcode == LIST) lister_taches(rep, T, nbtasks);
+                else if (opcode == 0x4352) traiter_create(fd_req, rep, chemin_tasks, &T, &nbtasks);
+                else if (opcode == COMBINE) traiter_combine(fd_req, rep, chemin_tasks, &T, &nbtasks);
+                else if (opcode == 0x524D) traiter_remove(fd_req, rep, chemin_tasks, &T, &nbtasks);
+                else if (opcode == STDOUT) {
+                    uint64_t tmp; read_all(fd_req, &tmp, 8); traiter_xoe(rep, chemin_tasks, be64toh(tmp), "stdout");
+                }
+                else if (opcode == STDERR) {
+                    uint64_t tmp; read_all(fd_req, &tmp, 8); traiter_xoe(rep, chemin_tasks, be64toh(tmp), "stderr");
+                }
+                else if (opcode == TIMES_EXITCODES) {
+                    uint64_t tmp; read_all(fd_req, &tmp, 8); traiter_xoe(rep, chemin_tasks, be64toh(tmp), "times-exitcodes");
+                }
+                else if (opcode == TERM) {
+                    running = 0;
+                    int f = open(rep, O_WRONLY);
+                    if(f != -1) { write_16(f, REP_OK); close(f); }
+                }
             }
         }
     }
@@ -547,5 +455,10 @@ int main(int argc, char *argv[]) {
     unlink(req);
     unlink(rep);
     if(T) free_tasks(T, nbtasks);
+
+    if (!avantPlan) {
+        signal(SIGTERM, SIG_IGN); 
+        kill(0, SIGTERM); 
+    }
     return 0;
 }
