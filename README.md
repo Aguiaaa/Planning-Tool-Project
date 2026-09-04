@@ -1,6 +1,5 @@
 # Projet Système : Planificateur de tâches (Erraid & Tadmor)
 
-Projet réalisé dans le cadre du cours de Système d'Exploitation.
 L'objectif est de créer un outil capable de programmer l'exécution de commandes à l'avance, un peu comme le `cron` de Linux.
 
 
