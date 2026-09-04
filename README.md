@@ -3,9 +3,6 @@
 Projet réalisé dans le cadre du cours de Système d'Exploitation.
 L'objectif est de créer un outil capable de programmer l'exécution de commandes à l'avance, un peu comme le `cron` de Linux.
 
-## Auteurs
-- **GUIA Amine** (22305962)
-- **GUIRIEV Abdula** (22315618)
 
 ## Description
 Le projet se compose de deux programmes :
